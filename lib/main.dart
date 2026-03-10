@@ -31,8 +31,15 @@ void main() async {
   );
 }
 
-class RlaCrmApp extends StatelessWidget {
+class RlaCrmApp extends StatefulWidget {
   const RlaCrmApp({super.key});
+
+  @override
+  State<RlaCrmApp> createState() => _RlaCrmAppState();
+}
+
+class _RlaCrmAppState extends State<RlaCrmApp> {
+  bool _splashDone = false;
 
   @override
   Widget build(BuildContext context) {
@@ -40,7 +47,11 @@ class RlaCrmApp extends StatelessWidget {
       title: 'RLA CRM',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.theme,
-      home: const AppRouter(),
+      home: _splashDone
+          ? const AppRouter()
+          : SplashScreen(
+              onComplete: () => setState(() => _splashDone = true),
+            ),
     );
   }
 }
@@ -55,7 +66,6 @@ class AppRouter extends StatefulWidget {
 class _AppRouterState extends State<AppRouter> {
   bool _trialDialogShown = false;
   final Set<String> _shownAlertIds = {};
-  bool _splashDone = false;
 
   @override
   void didChangeDependencies() {
@@ -115,13 +125,6 @@ class _AppRouterState extends State<AppRouter> {
 
   @override
   Widget build(BuildContext context) {
-    // Show splash screen first
-    if (!_splashDone) {
-      return SplashScreen(
-        onComplete: () => setState(() => _splashDone = true),
-      );
-    }
-
     final state = context.watch<AppState>();
     final user = state.currentUser;
 
