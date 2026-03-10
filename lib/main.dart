@@ -6,6 +6,7 @@ import 'core/app_state.dart';
 import 'core/models.dart';
 import 'core/theme.dart';
 import 'screens/login_screen.dart';
+import 'screens/splash_screen.dart';
 import 'screens/admin_dashboard.dart';
 import 'screens/sales_dashboard.dart';
 import 'screens/master_admin_dashboard.dart';
@@ -54,6 +55,7 @@ class AppRouter extends StatefulWidget {
 class _AppRouterState extends State<AppRouter> {
   bool _trialDialogShown = false;
   final Set<String> _shownAlertIds = {};
+  bool _splashDone = false;
 
   @override
   void didChangeDependencies() {
@@ -113,6 +115,13 @@ class _AppRouterState extends State<AppRouter> {
 
   @override
   Widget build(BuildContext context) {
+    // Show splash screen first
+    if (!_splashDone) {
+      return SplashScreen(
+        onComplete: () => setState(() => _splashDone = true),
+      );
+    }
+
     final state = context.watch<AppState>();
     final user = state.currentUser;
 
