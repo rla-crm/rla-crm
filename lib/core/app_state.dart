@@ -340,6 +340,7 @@ RLA CRM Platform
     _emailLogsBox = await Hive.openBox('email_logs_v7');
     _settingsBox = await Hive.openBox('settings_v7');
     _loadAll();
+    _cleanDemoData();   // remove legacy demo data on every startup
     if (_users.isEmpty) _seedData();
   }
 
@@ -353,8 +354,63 @@ RLA CRM Platform
     _emailLogs = _emailLogsBox.values.map((v) => EmailLog.fromMap(Map<String, dynamic>.from(jsonDecode(v)))).toList();
   }
 
+  /// Called on every startup to purge legacy demo data while keeping
+  /// the master admin (aksayal@gmail.com) and any real data added later.
+  void _cleanDemoData() {
+    // IDs that belong exclusively to seeded demo content
+    const demoUserIds = {
+      'user_c1_admin', 'user_c1_s1', 'user_c1_s2',
+      'user_c2_admin', 'user_c2_s1',
+      'user_c3_admin',
+    };
+    const demoCompanyIds = {'company_001', 'company_002', 'company_003'};
+    const demoProjectIds = {'proj_001', 'proj_002', 'proj_003'};
+    const demoLeadIds = {
+      'lead_001', 'lead_002', 'lead_003', 'lead_004',
+      'lead_005', 'lead_006', 'lead_007',
+    };
+    const demoNotifIds = {'notif_001', 'notif_002'};
+    const demoApprovalIds = {'approval_001', 'approval_002'};
+
+    // Remove from Hive boxes
+    for (final id in demoUserIds) { _usersBox.delete(id); }
+    for (final id in demoCompanyIds) { _companiesBox.delete(id); }
+    for (final id in demoProjectIds) { _projectsBox.delete(id); }
+    for (final id in demoLeadIds) { _leadsBox.delete(id); }
+    for (final id in demoNotifIds) { _notifBox.delete(id); }
+    for (final id in demoApprovalIds) { _approvalsBox.delete(id); }
+
+    // Also remove any leads / projects / approvals whose companyId is a demo company
+    final extraLeadKeys = _leadsBox.keys.where((k) {
+      try {
+        final m = Map<String, dynamic>.from(jsonDecode(_leadsBox.get(k)));
+        return demoCompanyIds.contains(m['companyId']);
+      } catch (_) { return false; }
+    }).toList();
+    for (final k in extraLeadKeys) { _leadsBox.delete(k); }
+
+    final extraProjKeys = _projectsBox.keys.where((k) {
+      try {
+        final m = Map<String, dynamic>.from(jsonDecode(_projectsBox.get(k)));
+        return demoCompanyIds.contains(m['companyId']);
+      } catch (_) { return false; }
+    }).toList();
+    for (final k in extraProjKeys) { _projectsBox.delete(k); }
+
+    final extraApprovalKeys = _approvalsBox.keys.where((k) {
+      try {
+        final m = Map<String, dynamic>.from(jsonDecode(_approvalsBox.get(k)));
+        return demoCompanyIds.contains(m['companyId']);
+      } catch (_) { return false; }
+    }).toList();
+    for (final k in extraApprovalKeys) { _approvalsBox.delete(k); }
+
+    // Reload in-memory lists after cleanup
+    _loadAll();
+  }
+
   void _seedData() {
-    // ── Master Admin ──────────────────────────────────────────────────────
+    // ── Master Admin only ─────────────────────────────────────────────────
     final masterAdmin = AppUser(
       id: 'master_admin_001',
       name: 'Aksayal',
@@ -366,299 +422,7 @@ RLA CRM Platform
       hasLoggedInBefore: true,
     );
 
-    // ── Demo Company 1: Prestige Group ─────────────────────────────────────
-    final company1 = Company(
-      id: 'company_001',
-      name: 'Prestige Group',
-      adminEmail: 'admin@prestige.com',
-      adminName: 'Rahul Kapoor',
-      phone: '+91 9876543210',
-      isApproved: true,
-    );
-
-    final comp1Admin = AppUser(
-      id: 'user_c1_admin',
-      name: 'Rahul Kapoor',
-      email: 'admin@prestige.com',
-      password: 'admin123',
-      role: UserRole.companyAdmin,
-      companyId: 'company_001',
-      companyName: 'Prestige Group',
-      isApproved: true,
-      hasLoggedInBefore: true,
-    );
-
-    final comp1Sales1 = AppUser(
-      id: 'user_c1_s1',
-      name: 'Arjun Sharma',
-      email: 'arjun@prestige.com',
-      password: 'sales123',
-      role: UserRole.sales,
-      companyId: 'company_001',
-      companyName: 'Prestige Group',
-      isApproved: true,
-      hasLoggedInBefore: true,
-    );
-
-    final comp1Sales2 = AppUser(
-      id: 'user_c1_s2',
-      name: 'Priya Mehta',
-      email: 'priya@prestige.com',
-      password: 'sales123',
-      role: UserRole.sales,
-      companyId: 'company_001',
-      companyName: 'Prestige Group',
-      isApproved: true,
-      hasLoggedInBefore: true,
-    );
-
-    // ── Demo Company 2: Brigade Group ─────────────────────────────────────
-    final company2 = Company(
-      id: 'company_002',
-      name: 'Brigade Group',
-      adminEmail: 'admin@brigade.com',
-      adminName: 'Sunita Reddy',
-      phone: '+91 9876543211',
-      isApproved: true,
-    );
-
-    final comp2Admin = AppUser(
-      id: 'user_c2_admin',
-      name: 'Sunita Reddy',
-      email: 'admin@brigade.com',
-      password: 'admin123',
-      role: UserRole.companyAdmin,
-      companyId: 'company_002',
-      companyName: 'Brigade Group',
-      isApproved: true,
-      hasLoggedInBefore: true,
-    );
-
-    final comp2Sales1 = AppUser(
-      id: 'user_c2_s1',
-      name: 'Vikram Nair',
-      email: 'vikram@brigade.com',
-      password: 'sales123',
-      role: UserRole.sales,
-      companyId: 'company_002',
-      companyName: 'Brigade Group',
-      isApproved: true,
-      hasLoggedInBefore: true,
-    );
-
-    // ── Demo Company 3: Sobha Realty ───────────────────────────────────────
-    final company3 = Company(
-      id: 'company_003',
-      name: 'Sobha Realty',
-      adminEmail: 'admin@sobha.com',
-      adminName: 'Kiran Patel',
-      phone: '+91 9876543212',
-      isApproved: true,
-    );
-
-    final comp3Admin = AppUser(
-      id: 'user_c3_admin',
-      name: 'Kiran Patel',
-      email: 'admin@sobha.com',
-      password: 'admin123',
-      role: UserRole.companyAdmin,
-      companyId: 'company_003',
-      companyName: 'Sobha Realty',
-      isApproved: true,
-      hasLoggedInBefore: true,
-    );
-
-    // ── Projects ─────────────────────────────────────────────────────────
-    final proj1 = RealEstateProject(
-      id: 'proj_001',
-      name: 'Prestige Lakeside',
-      location: 'Whitefield, Bangalore',
-      description: 'Premium lakeside apartments with world-class amenities',
-      developerName: 'Prestige Group',
-      propertyType: PropertyType.apartment,
-      priceFrom: 6500000, priceTo: 15000000,
-      totalUnits: 240,
-      reraNumber: 'PRM/KA/RERA/1251/308',
-      assignedSalesIds: ['user_c1_s1', 'user_c1_s2'],
-      createdById: 'user_c1_admin', createdByName: 'Rahul Kapoor',
-      companyId: 'company_001',
-    );
-
-    final proj2 = RealEstateProject(
-      id: 'proj_002',
-      name: 'Prestige Orchards',
-      location: 'Devanahalli, Bangalore',
-      description: 'Luxury villas surrounded by lush greenery',
-      developerName: 'Prestige Group',
-      propertyType: PropertyType.villa,
-      priceFrom: 12000000, priceTo: 35000000,
-      totalUnits: 180,
-      assignedSalesIds: ['user_c1_s1'],
-      createdById: 'user_c1_admin', createdByName: 'Rahul Kapoor',
-      companyId: 'company_001',
-    );
-
-    final proj3 = RealEstateProject(
-      id: 'proj_003',
-      name: 'Brigade Meadows',
-      location: 'Kanakapura Road, Bangalore',
-      description: 'Integrated township with residential and commercial spaces',
-      developerName: 'Brigade Group',
-      propertyType: PropertyType.apartment,
-      priceFrom: 4500000, priceTo: 9000000,
-      totalUnits: 320,
-      assignedSalesIds: ['user_c2_s1'],
-      createdById: 'user_c2_admin', createdByName: 'Sunita Reddy',
-      companyId: 'company_002',
-    );
-
-    // ── Sample Leads ──────────────────────────────────────────────────────
-    final now = DateTime.now();
-    final leads = [
-      Lead(id: 'lead_001', name: 'Rohan Verma', phone: '9876543001',
-          email: 'rohan@email.com', projectId: 'proj_001',
-          projectName: 'Prestige Lakeside', propertyType: PropertyType.apartment,
-          budgetMin: 8000000, budgetMax: 12000000,
-          source: LeadSource.website, status: LeadStatus.siteVisit,
-          assignedToId: 'user_c1_s1', assignedToName: 'Arjun Sharma',
-          siteVisitDate: '20 Mar 2026',
-          createdById: 'user_c1_s1', createdByName: 'Arjun Sharma',
-          createdAt: now.subtract(const Duration(days: 2)),
-          updatedAt: now.subtract(const Duration(hours: 3)),
-          companyId: 'company_001'),
-      Lead(id: 'lead_002', name: 'Kavya Iyer', phone: '9876543002',
-          email: 'kavya@email.com', projectId: 'proj_002',
-          projectName: 'Prestige Orchards', propertyType: PropertyType.villa,
-          budgetMin: 15000000, budgetMax: 25000000,
-          source: LeadSource.referral, status: LeadStatus.negotiation,
-          assignedToId: 'user_c1_s1', assignedToName: 'Arjun Sharma',
-          createdById: 'user_c1_s1', createdByName: 'Arjun Sharma',
-          createdAt: now.subtract(const Duration(days: 5)),
-          updatedAt: now.subtract(const Duration(days: 1)),
-          companyId: 'company_001'),
-      Lead(id: 'lead_003', name: 'Suresh Patel', phone: '9876543003',
-          projectId: 'proj_001', projectName: 'Prestige Lakeside',
-          propertyType: PropertyType.apartment,
-          budgetMin: 6500000, budgetMax: 10000000,
-          source: LeadSource.walkin, status: LeadStatus.contacted,
-          assignedToId: 'user_c1_s2', assignedToName: 'Priya Mehta',
-          followUpDate: '18 Mar 2026',
-          createdById: 'user_c1_s2', createdByName: 'Priya Mehta',
-          createdAt: now.subtract(const Duration(days: 3)),
-          updatedAt: now.subtract(const Duration(hours: 6)),
-          companyId: 'company_001'),
-      Lead(id: 'lead_004', name: 'Anita Desai', phone: '9876543004',
-          projectId: 'proj_001', projectName: 'Prestige Lakeside',
-          propertyType: PropertyType.apartment,
-          budgetMin: 7000000,
-          source: LeadSource.socialMedia, status: LeadStatus.newLead,
-          assignedToId: 'user_c1_s2', assignedToName: 'Priya Mehta',
-          createdById: 'user_c1_s2', createdByName: 'Priya Mehta',
-          createdAt: now.subtract(const Duration(hours: 8)),
-          updatedAt: now.subtract(const Duration(hours: 8)),
-          companyId: 'company_001'),
-      Lead(id: 'lead_005', name: 'Manoj Kumar', phone: '9876543005',
-          projectId: 'proj_002', projectName: 'Prestige Orchards',
-          propertyType: PropertyType.villa,
-          budgetMin: 20000000,
-          source: LeadSource.referral, status: LeadStatus.closed,
-          assignedToId: 'user_c1_s1', assignedToName: 'Arjun Sharma',
-          createdById: 'user_c1_s1', createdByName: 'Arjun Sharma',
-          createdAt: now.subtract(const Duration(days: 15)),
-          updatedAt: now.subtract(const Duration(days: 2)),
-          companyId: 'company_001'),
-      Lead(id: 'lead_006', name: 'Divya Krishnan', phone: '9876543006',
-          projectId: 'proj_003', projectName: 'Brigade Meadows',
-          propertyType: PropertyType.apartment,
-          budgetMin: 5000000, budgetMax: 8000000,
-          source: LeadSource.portal, status: LeadStatus.siteVisit,
-          assignedToId: 'user_c2_s1', assignedToName: 'Vikram Nair',
-          siteVisitDate: '22 Mar 2026',
-          createdById: 'user_c2_s1', createdByName: 'Vikram Nair',
-          createdAt: now.subtract(const Duration(days: 4)),
-          updatedAt: now.subtract(const Duration(days: 1)),
-          companyId: 'company_002'),
-      Lead(id: 'lead_007', name: 'Ravi Shankar', phone: '9876543007',
-          projectId: 'proj_003', projectName: 'Brigade Meadows',
-          propertyType: PropertyType.apartment,
-          budgetMin: 4500000,
-          source: LeadSource.coldCall, status: LeadStatus.contacted,
-          assignedToId: 'user_c2_s1', assignedToName: 'Vikram Nair',
-          createdById: 'user_c2_s1', createdByName: 'Vikram Nair',
-          createdAt: now.subtract(const Duration(days: 6)),
-          updatedAt: now.subtract(const Duration(hours: 12)),
-          companyId: 'company_002'),
-    ];
-
-    // ── Notifications ─────────────────────────────────────────────────────
-    final notif1 = CrmNotification(
-      id: 'notif_001',
-      title: 'Welcome to RLA CRM',
-      message: 'Your CRM is set up and ready. Start adding leads and managing projects!',
-      createdById: 'user_c1_admin', createdByName: 'Rahul Kapoor',
-      isForAll: true, priority: NotificationPriority.high,
-      companyId: 'company_001',
-    );
-
-    final notif2 = CrmNotification(
-      id: 'notif_002',
-      title: 'Welcome to RLA CRM',
-      message: 'Your CRM is set up and ready. Start managing your real estate leads!',
-      createdById: 'user_c2_admin', createdByName: 'Sunita Reddy',
-      isForAll: true, priority: NotificationPriority.high,
-      companyId: 'company_002',
-    );
-
-    // ── Sample pending approvals ──────────────────────────────────────────
-    final sampleApproval1 = ApprovalRequest(
-      id: 'approval_001',
-      type: ApprovalType.companyRegistration,
-      status: ApprovalStatus.pending,
-      applicantName: 'Anand Verma',
-      applicantEmail: 'admin@godrejproperties.com',
-      companyName: 'Godrej Properties',
-      adminEmail: 'admin@godrejproperties.com',
-      phone: '+91 9988776655',
-      password: 'godrej123',
-    );
-
-    final sampleApproval2 = ApprovalRequest(
-      id: 'approval_002',
-      type: ApprovalType.employeeSignup,
-      status: ApprovalStatus.pending,
-      applicantName: 'Neha Singh',
-      applicantEmail: 'neha@prestige.com',
-      companyId: 'company_001',
-      companyName: 'Prestige Group',
-      password: 'neha1234',
-      role: 'sales',
-    );
-
-    // ── Save all ──────────────────────────────────────────────────────────
     _saveUser(masterAdmin);
-    _saveUser(comp1Admin);
-    _saveUser(comp1Sales1);
-    _saveUser(comp1Sales2);
-    _saveUser(comp2Admin);
-    _saveUser(comp2Sales1);
-    _saveUser(comp3Admin);
-
-    _saveCompany(company1);
-    _saveCompany(company2);
-    _saveCompany(company3);
-
-    _saveProject(proj1);
-    _saveProject(proj2);
-    _saveProject(proj3);
-
-    for (final l in leads) { _saveLead(l); }
-
-    _saveNotification(notif1);
-    _saveNotification(notif2);
-
-    _saveApproval(sampleApproval1);
-    _saveApproval(sampleApproval2);
-
     _loadAll();
   }
 
