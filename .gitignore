@@ -1,6 +1,6 @@
 # Flutter/Dart
 # Build outputs (exclude to save space)
-/build/
+# /build/ (included for Cloudflare Pages deployment)
 /.dart_tool/
 .packages
 .pub-cache/
