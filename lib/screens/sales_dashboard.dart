@@ -55,9 +55,27 @@ class _SalesDashboardState extends State<SalesDashboard> with TickerProviderStat
   @override
   Widget build(BuildContext context) {
     final isWide = MediaQuery.of(context).size.width > 800;
+    if (isWide) {
+      return Scaffold(
+        backgroundColor: AppColors.background,
+        body: _buildWide(),
+      );
+    }
+    final state = context.watch<AppState>();
     return Scaffold(
       backgroundColor: AppColors.background,
-      body: isWide ? _buildWide() : _buildMobile(),
+      drawer: Drawer(
+        backgroundColor: AppColors.surface,
+        width: 260,
+        child: _SalesSidebar(
+          tabs: _tabs.toList(),
+          icons: _icons.toList(),
+          current: _tab,
+          onSelect: (i) { Navigator.pop(context); _switchTab(i); },
+          unreadCount: state.unreadNotificationCount,
+        ),
+      ),
+      body: _buildMobile(),
     );
   }
 
@@ -83,6 +101,47 @@ class _SalesDashboardState extends State<SalesDashboard> with TickerProviderStat
     final state = context.watch<AppState>();
     return Column(
       children: [
+        // Mobile top bar
+        SafeArea(
+          bottom: false,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              border: Border(bottom: BorderSide(color: AppColors.border)),
+            ),
+            child: Row(
+              children: [
+                GestureDetector(
+                  onTap: () => Scaffold.of(context).openDrawer(),
+                  child: Container(
+                    width: 36, height: 36,
+                    decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.border)),
+                    child: const Icon(Icons.menu_rounded, size: 18, color: AppColors.textSecondary),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(state.currentUser?.name ?? '', style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary), maxLines: 1, overflow: TextOverflow.ellipsis),
+                      Text(state.currentCompany?.name ?? '', style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted), maxLines: 1, overflow: TextOverflow.ellipsis),
+                    ],
+                  ),
+                ),
+                GestureDetector(
+                  onTap: () => context.read<AppState>().logout(),
+                  child: Container(
+                    width: 36, height: 36,
+                    decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.border)),
+                    child: const Icon(Icons.logout_rounded, size: 17, color: AppColors.textMuted),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
         Expanded(child: FadeTransition(opacity: _fadeAnim, child: _screen())),
         _SalesBottomNav(
           tabs: _tabs.toList(),

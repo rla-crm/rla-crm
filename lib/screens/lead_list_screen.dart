@@ -205,9 +205,7 @@ class _LeadListScreenState extends State<LeadListScreen> {
           style: GoogleFonts.inter(
             fontSize: 11,
             fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
-            color: isActive
-                ? (status == null ? AppColors.textPrimary : _darken(status.color))
-                : AppColors.textSecondary,
+            color: AppColors.textPrimary,
           ),
         ),
       ),
@@ -233,11 +231,6 @@ class _LeadListScreenState extends State<LeadListScreen> {
                 color: isActive ? AppColors.textPrimary : AppColors.textMuted)),
       ),
     );
-  }
-
-  Color _darken(Color color) {
-    final hsl = HSLColor.fromColor(color);
-    return hsl.withLightness((hsl.lightness - 0.25).clamp(0.0, 1.0)).toColor();
   }
 
   PageRouteBuilder _slide(Widget page) => PageRouteBuilder(

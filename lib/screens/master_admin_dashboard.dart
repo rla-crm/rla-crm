@@ -55,9 +55,28 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard>
   @override
   Widget build(BuildContext context) {
     final isWide = MediaQuery.of(context).size.width > 800;
+    if (isWide) {
+      return Scaffold(
+        backgroundColor: AppColors.background,
+        body: _buildWideLayout(),
+      );
+    }
+    final state = context.watch<AppState>();
+    final pendingCount = state.pendingApprovalCount;
     return Scaffold(
       backgroundColor: AppColors.background,
-      body: isWide ? _buildWideLayout() : _buildMobileLayout(),
+      drawer: Drawer(
+        backgroundColor: AppColors.surface,
+        width: 260,
+        child: _MasterSidebar(
+          tabs: _tabs.toList(),
+          icons: _icons.toList(),
+          current: _tab,
+          onSelect: (i) { Navigator.pop(context); _switchTab(i); },
+          pendingApprovals: pendingCount,
+        ),
+      ),
+      body: _buildMobileLayout(),
     );
   }
 
@@ -85,6 +104,54 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard>
     final pendingCount = state.pendingApprovalCount;
     return Column(
       children: [
+        // Mobile top bar with menu + logout
+        SafeArea(
+          bottom: false,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              border: Border(bottom: BorderSide(color: AppColors.border)),
+            ),
+            child: Row(
+              children: [
+                GestureDetector(
+                  onTap: () => Scaffold.of(context).openDrawer(),
+                  child: Container(
+                    width: 36, height: 36,
+                    decoration: BoxDecoration(gradient: AppColors.gradientSecondary, borderRadius: BorderRadius.circular(10)),
+                    child: const Icon(Icons.menu_rounded, size: 18, color: Colors.white),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const RlaBrand(size: 13),
+                      Text('Master Admin · ${state.currentUser?.name ?? ""}', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted), maxLines: 1, overflow: TextOverflow.ellipsis),
+                    ],
+                  ),
+                ),
+                if (pendingCount > 0)
+                  Container(
+                    margin: const EdgeInsets.only(right: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(color: AppColors.peach.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(8)),
+                    child: Text('$pendingCount pending', style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w700, color: const Color(0xFFD08020))),
+                  ),
+                GestureDetector(
+                  onTap: () => context.read<AppState>().logout(),
+                  child: Container(
+                    width: 36, height: 36,
+                    decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.border)),
+                    child: const Icon(Icons.logout_rounded, size: 17, color: AppColors.textMuted),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
         Expanded(child: FadeTransition(opacity: _fadeAnim, child: _currentScreen())),
         _MasterBottomNav(
           tabs: _tabs.toList(),
@@ -267,7 +334,7 @@ class _MasterBottomNav extends StatelessWidget {
       child: SafeArea(
         top: false,
         child: SizedBox(
-          height: 56,
+          height: 52,
           child: Row(
             children: List.generate(tabs.length, (i) {
               final sel = i == current;
@@ -275,27 +342,32 @@ class _MasterBottomNav extends StatelessWidget {
                 child: GestureDetector(
                   onTap: () => onSelect(i),
                   behavior: HitTestBehavior.opaque,
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          Icon(icons[i], size: 20, color: sel ? AppColors.peach : AppColors.textMuted),
-                          if (i == 1 && pendingApprovals > 0)
-                            Positioned(
-                              top: -4, right: -8,
-                              child: Container(
-                                width: 14, height: 14,
-                                decoration: const BoxDecoration(color: AppColors.pink, shape: BoxShape.circle),
-                                child: Center(child: Text('$pendingApprovals', style: GoogleFonts.inter(fontSize: 8, fontWeight: FontWeight.w700, color: Colors.white))),
-                              ),
+                  child: Center(
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          width: 36, height: 36,
+                          decoration: BoxDecoration(
+                            color: sel ? AppColors.peach.withValues(alpha: 0.15) : Colors.transparent,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Center(
+                            child: Icon(icons[i], size: 20, color: sel ? AppColors.peach : AppColors.textMuted),
+                          ),
+                        ),
+                        if (i == 1 && pendingApprovals > 0)
+                          Positioned(
+                            top: -2, right: -6,
+                            child: Container(
+                              width: 14, height: 14,
+                              decoration: const BoxDecoration(color: AppColors.pink, shape: BoxShape.circle),
+                              child: Center(child: Text('$pendingApprovals', style: GoogleFonts.inter(fontSize: 8, fontWeight: FontWeight.w700, color: Colors.white))),
                             ),
-                        ],
-                      ),
-                      const SizedBox(height: 2),
-                      Text(tabs[i], style: GoogleFonts.inter(fontSize: 9, fontWeight: sel ? FontWeight.w600 : FontWeight.w400, color: sel ? AppColors.peach : AppColors.textMuted)),
-                    ],
+                          ),
+                      ],
+                    ),
                   ),
                 ),
               );

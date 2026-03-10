@@ -109,7 +109,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
           borderRadius: BorderRadius.circular(20),
           border: Border.all(color: isActive ? Colors.transparent : AppColors.border),
         ),
-        child: Text(label, style: GoogleFonts.inter(fontSize: 11, fontWeight: isActive ? FontWeight.w600 : FontWeight.w400, color: isActive ? Colors.white : AppColors.textSecondary)),
+        child: Text(label, style: GoogleFonts.inter(fontSize: 11, fontWeight: isActive ? FontWeight.w600 : FontWeight.w400, color: isActive ? AppColors.textPrimary : AppColors.textPrimary)),
       ),
     );
   }
