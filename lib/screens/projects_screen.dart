@@ -85,7 +85,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                           onEdit: state.isAdmin ? () => _showProjectSheet(context, state, projects[idx]) : null,
                           onDelete: state.isAdmin ? () => _confirmDelete(context, state, projects[idx]) : null,
                           onViewLeads: () => Navigator.push(context, _slide(
-                            const LeadListScreen(),
+                            LeadListScreen(showBackButton: true, projectFilter: projects[idx].name),
                           )),
                         ),
                       ),

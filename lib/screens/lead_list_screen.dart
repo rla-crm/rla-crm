@@ -9,7 +9,9 @@ import 'lead_detail_screen.dart';
 import 'add_edit_lead_screen.dart';
 
 class LeadListScreen extends StatefulWidget {
-  const LeadListScreen({super.key});
+  final bool showBackButton;
+  final String? projectFilter; // optional project name to pre-filter
+  const LeadListScreen({super.key, this.showBackButton = false, this.projectFilter});
 
   @override
   State<LeadListScreen> createState() => _LeadListScreenState();
@@ -56,6 +58,7 @@ class _LeadListScreenState extends State<LeadListScreen> {
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     final leads = _filtered(state.myLeads);
+    final canGoBack = widget.showBackButton && Navigator.of(context).canPop();
 
     return SafeArea(
       child: Column(
@@ -69,7 +72,35 @@ class _LeadListScreenState extends State<LeadListScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text('Leads', style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                      Row(
+                        children: [
+                          if (canGoBack) ...
+                            [
+                              GestureDetector(
+                                onTap: () => Navigator.pop(context),
+                                child: Container(
+                                  width: 36, height: 36,
+                                  margin: const EdgeInsets.only(right: 10),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.surface,
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(color: AppColors.border),
+                                    boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 6, offset: const Offset(0, 2))],
+                                  ),
+                                  child: const Icon(Icons.arrow_back_ios_new_rounded, size: 16, color: AppColors.textSecondary),
+                                ),
+                              ),
+                            ],
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Leads', style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                              if (widget.projectFilter != null)
+                                Text(widget.projectFilter!, style: GoogleFonts.inter(fontSize: 12, color: AppColors.lavender, fontWeight: FontWeight.w500)),
+                            ],
+                          ),
+                        ],
+                      ),
                       GestureDetector(
                         onTap: () => Navigator.push(context, _slide(const AddEditLeadScreen())),
                         child: Container(
