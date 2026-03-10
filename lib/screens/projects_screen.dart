@@ -412,20 +412,20 @@ class _ProjectCard extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(project.name, style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white)),
+                          Text(project.name, style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
                           const SizedBox(height: 2),
                           Row(children: [
-                            const Icon(Icons.location_on_outlined, size: 12, color: Colors.white70),
+                            const Icon(Icons.location_on_outlined, size: 12, color: AppColors.textSecondary),
                             const SizedBox(width: 3),
-                            Text(project.location, style: GoogleFonts.inter(fontSize: 12, color: Colors.white70)),
+                            Text(project.location, style: GoogleFonts.inter(fontSize: 12, color: AppColors.textSecondary)),
                           ]),
                         ],
                       ),
                     ),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(8)),
-                      child: Text(project.status.label, style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w600, color: Colors.white)),
+                      decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(8)),
+                      child: Text(project.status.label, style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
                     ),
                   ],
                 ),
@@ -535,9 +535,9 @@ class _ProjectCard extends StatelessWidget {
   }
 
   Widget _hstat(String val, String label) => Expanded(child: Column(children: [
-    Text(val, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white), maxLines: 1, overflow: TextOverflow.ellipsis),
-    Text(label, style: GoogleFonts.inter(fontSize: 9, color: Colors.white70)),
+    Text(val, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary), maxLines: 1, overflow: TextOverflow.ellipsis),
+    Text(label, style: GoogleFonts.inter(fontSize: 9, color: AppColors.textSecondary)),
   ]));
 
-  Widget _vsep() => Container(width: 1, height: 28, color: Colors.white.withValues(alpha: 0.2), margin: const EdgeInsets.symmetric(horizontal: 4));
+  Widget _vsep() => Container(width: 1, height: 28, color: AppColors.textPrimary.withValues(alpha: 0.15), margin: const EdgeInsets.symmetric(horizontal: 4));
 }
