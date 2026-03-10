@@ -154,7 +154,7 @@ class _AdminSidebar extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(company?.name ?? 'Company', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary), maxLines: 1, overflow: TextOverflow.ellipsis),
-                      Text(company?.plan.label ?? '', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
+                      Text(company?.adminName ?? '', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
                     ],
                   )),
                 ],
@@ -949,7 +949,7 @@ class _ProfileSheet extends StatelessWidget {
           if (company != null) ...[
             const SizedBox(height: 6),
             Text(company.name, style: GoogleFonts.inter(fontSize: 12, color: AppColors.textSecondary)),
-            StatusPill(label: company.plan.label, color: company.plan.color, isSmall: true),
+            StatusPill(label: company.isActive ? 'Active' : 'Inactive', color: company.isActive ? const Color(0xFFB8FFE4) : const Color(0xFFE0E0E8), isSmall: true),
           ],
           const SizedBox(height: 24),
           GradientButton(

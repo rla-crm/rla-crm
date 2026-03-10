@@ -21,9 +21,7 @@ enum NotificationPriority { low, medium, high }
 
 enum ProjectStatus { active, onHold, completed }
 
-enum SubscriptionPlan { trial, starter, professional, enterprise }
-
-// NEW: Approval request types and status
+// Approval request types and status
 enum ApprovalType { companyRegistration, employeeSignup }
 
 enum ApprovalStatus { pending, approved, rejected }
@@ -110,64 +108,6 @@ extension ProjectStatusExt on ProjectStatus {
       case ProjectStatus.completed: return const Color(0xFFC9B8FF);
     }
   }
-}
-
-extension SubscriptionPlanExt on SubscriptionPlan {
-  String get label {
-    switch (this) {
-      case SubscriptionPlan.trial: return 'Free Trial';
-      case SubscriptionPlan.starter: return 'Starter';
-      case SubscriptionPlan.professional: return 'Professional';
-      case SubscriptionPlan.enterprise: return 'Enterprise';
-    }
-  }
-
-  String get price {
-    switch (this) {
-      case SubscriptionPlan.trial: return 'Free';
-      case SubscriptionPlan.starter: return '₹2,999/mo';
-      case SubscriptionPlan.professional: return '₹7,999/mo';
-      case SubscriptionPlan.enterprise: return 'Custom';
-    }
-  }
-
-  double get monthlyRevenue {
-    switch (this) {
-      case SubscriptionPlan.trial: return 0;
-      case SubscriptionPlan.starter: return 2999;
-      case SubscriptionPlan.professional: return 7999;
-      case SubscriptionPlan.enterprise: return 25000;
-    }
-  }
-
-  int get maxUsers {
-    switch (this) {
-      case SubscriptionPlan.trial: return 3;
-      case SubscriptionPlan.starter: return 10;
-      case SubscriptionPlan.professional: return 50;
-      case SubscriptionPlan.enterprise: return 999;
-    }
-  }
-
-  int get maxProjects {
-    switch (this) {
-      case SubscriptionPlan.trial: return 2;
-      case SubscriptionPlan.starter: return 5;
-      case SubscriptionPlan.professional: return 25;
-      case SubscriptionPlan.enterprise: return 999;
-    }
-  }
-
-  Color get color {
-    switch (this) {
-      case SubscriptionPlan.trial: return const Color(0xFFE0E0E8);
-      case SubscriptionPlan.starter: return const Color(0xFFB8EEFF);
-      case SubscriptionPlan.professional: return const Color(0xFFC9B8FF);
-      case SubscriptionPlan.enterprise: return const Color(0xFFFFD4A8);
-    }
-  }
-
-  bool get isPaid => this != SubscriptionPlan.trial;
 }
 
 extension ApprovalStatusExt on ApprovalStatus {
@@ -321,16 +261,12 @@ class Company {
   String? phone;
   String? website;
   String? address;
-  SubscriptionPlan plan;
   bool isActive;
-  bool isApproved;           // NEW: requires master admin approval
+  bool isApproved;           // requires master admin approval
   final DateTime createdAt;
   DateTime updatedAt;
-  DateTime? trialStartDate;  // NEW: when trial started (on approval)
   int totalLeads;
   int totalUsers;
-
-  static const int trialDurationDays = 14;
 
   Company({
     String? id,
@@ -340,31 +276,19 @@ class Company {
     this.phone,
     this.website,
     this.address,
-    this.plan = SubscriptionPlan.trial,
     this.isActive = true,
     this.isApproved = false,
     DateTime? createdAt,
     DateTime? updatedAt,
-    this.trialStartDate,
     this.totalLeads = 0,
     this.totalUsers = 1,
   })  : id = id ?? _uuid.v4(),
         createdAt = createdAt ?? DateTime.now(),
         updatedAt = updatedAt ?? DateTime.now();
 
-  int get trialDaysLeft {
-    if (trialStartDate == null) return trialDurationDays;
-    final elapsed = DateTime.now().difference(trialStartDate!).inDays;
-    return (trialDurationDays - elapsed).clamp(0, trialDurationDays);
-  }
-
   int get daysElapsed {
-    final start = trialStartDate ?? createdAt;
-    return DateTime.now().difference(start).inDays;
+    return DateTime.now().difference(createdAt).inDays;
   }
-
-  bool get isTrialExpired =>
-      plan == SubscriptionPlan.trial && trialDaysLeft <= 0;
 
   bool get isFirstLogin => false; // tracked separately in AppState
 
@@ -376,12 +300,10 @@ class Company {
         'phone': phone,
         'website': website,
         'address': address,
-        'plan': plan.index,
         'isActive': isActive,
         'isApproved': isApproved,
         'createdAt': createdAt.toIso8601String(),
         'updatedAt': updatedAt.toIso8601String(),
-        'trialStartDate': trialStartDate?.toIso8601String(),
         'totalLeads': totalLeads,
         'totalUsers': totalUsers,
       };
@@ -394,14 +316,10 @@ class Company {
         phone: map['phone'],
         website: map['website'],
         address: map['address'],
-        plan: SubscriptionPlan.values[map['plan'] ?? 0],
         isActive: map['isActive'] ?? true,
         isApproved: map['isApproved'] ?? true, // legacy data defaults to approved
         createdAt: DateTime.parse(map['createdAt']),
         updatedAt: DateTime.parse(map['updatedAt']),
-        trialStartDate: map['trialStartDate'] != null
-            ? DateTime.parse(map['trialStartDate'])
-            : null,
         totalLeads: map['totalLeads'] ?? 0,
         totalUsers: map['totalUsers'] ?? 1,
       );

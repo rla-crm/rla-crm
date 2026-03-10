@@ -433,7 +433,7 @@ Active Projects: ${widget.state.companyProjects.length}
       reportContent = '''
 REVENUE REPORT — $dateStr
 Company: $companyName
-Plan: ${widget.state.currentCompany?.plan.label ?? 'N/A'}
+Company: ${widget.state.currentCompany?.name ?? 'N/A'}
 Leads Total: ${widget.leads.length}
 Closed Leads: ${widget.leads.where((l) => l.status == LeadStatus.closed).length}
 Budget Range: ${widget.leads.isNotEmpty ? widget.leads.first.budgetDisplay : 'N/A'}
@@ -565,7 +565,7 @@ $lines
             'revenue',
             Icons.attach_money_rounded,
             'Revenue Report',
-            'Company revenue, subscription plan, deal values, closed leads breakdown',
+            'Company performance, deal values, closed leads breakdown',
             AppColors.gradientSuccess,
           ),
           const SizedBox(height: 12),

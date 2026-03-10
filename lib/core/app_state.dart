@@ -194,28 +194,48 @@ class AppState extends ChangeNotifier {
   int get totalAllLeads => _leads.length;
   int get totalAllUsers => _users.length;
 
-  // ─── Subscription / Revenue Analytics ────────────────────────────────────
+  // ─── Company Analytics ─────────────────────────────────────────────────────
   List<Company> get approvedCompanies => _companies.where((c) => c.isApproved).toList();
-  List<Company> get paidCompanies => approvedCompanies.where((c) => c.plan.isPaid).toList();
-  List<Company> get trialCompanies => approvedCompanies.where((c) => c.plan == SubscriptionPlan.trial).toList();
-
-  double get actualMonthlyRevenue =>
-      paidCompanies.fold(0.0, (sum, c) => sum + c.plan.monthlyRevenue);
-
-  double get prospectMonthlyRevenue =>
-      trialCompanies.fold(0.0, (sum, c) => sum + SubscriptionPlan.professional.monthlyRevenue);
-
-  Map<SubscriptionPlan, int> get companiesByPlan {
-    final map = <SubscriptionPlan, int>{};
-    for (final p in SubscriptionPlan.values) {
-      map[p] = _companies.where((c) => c.plan == p && c.isApproved).length;
-    }
-    return map;
-  }
 
   List<Company> get recentCompanies {
     final sorted = List<Company>.from(approvedCompanies)..sort((a, b) => b.createdAt.compareTo(a.createdAt));
     return sorted.take(5).toList();
+  }
+
+  // ─── Master Admin Project & Lead Analytics ─────────────────────────────────
+  int get totalAllProjects => _projects.length;
+  int get totalAllClosures => _leads.where((l) => l.status == LeadStatus.closed).length;
+  double get overallConversionRate {
+    if (_leads.isEmpty) return 0.0;
+    return (totalAllClosures / _leads.length) * 100;
+  }
+
+  Map<String, Map<String, dynamic>> get allProjectsStats {
+    final map = <String, Map<String, dynamic>>{};
+    for (final p in _projects) {
+      final pLeads = _leads.where((l) => l.projectId == p.id).toList();
+      final closed = pLeads.where((l) => l.status == LeadStatus.closed).length;
+      final company = _companies.firstWhere((c) => c.id == p.companyId,
+          orElse: () => Company(id: p.companyId, name: 'Unknown', adminEmail: '', adminName: ''));
+      map[p.id] = {
+        'project': p,
+        'company': company,
+        'totalLeads': pLeads.length,
+        'closed': closed,
+        'siteVisit': pLeads.where((l) => l.status == LeadStatus.siteVisit).length,
+        'newLeads': pLeads.where((l) => l.status == LeadStatus.newLead).length,
+        'conversionRate': pLeads.isEmpty ? 0.0 : (closed / pLeads.length) * 100,
+      };
+    }
+    return map;
+  }
+
+  Map<LeadStatus, int> get globalLeadsByStatus {
+    final map = <LeadStatus, int>{};
+    for (final s in LeadStatus.values) {
+      map[s] = _leads.where((l) => l.status == s).length;
+    }
+    return map;
   }
 
   int usersForCompany(String companyId) =>
@@ -311,14 +331,14 @@ RLA CRM Platform
 
   Future<void> init() async {
     await Hive.initFlutter();
-    _usersBox = await Hive.openBox('users_v6');
-    _leadsBox = await Hive.openBox('leads_v6');
-    _notifBox = await Hive.openBox('notifs_v6');
-    _projectsBox = await Hive.openBox('projects_v6');
-    _companiesBox = await Hive.openBox('companies_v6');
-    _approvalsBox = await Hive.openBox('approvals_v6');
-    _emailLogsBox = await Hive.openBox('email_logs_v6');
-    _settingsBox = await Hive.openBox('settings_v6');
+    _usersBox = await Hive.openBox('users_v7');
+    _leadsBox = await Hive.openBox('leads_v7');
+    _notifBox = await Hive.openBox('notifs_v7');
+    _projectsBox = await Hive.openBox('projects_v7');
+    _companiesBox = await Hive.openBox('companies_v7');
+    _approvalsBox = await Hive.openBox('approvals_v7');
+    _emailLogsBox = await Hive.openBox('email_logs_v7');
+    _settingsBox = await Hive.openBox('settings_v7');
     _loadAll();
     if (_users.isEmpty) _seedData();
   }
@@ -353,9 +373,7 @@ RLA CRM Platform
       adminEmail: 'admin@prestige.com',
       adminName: 'Rahul Kapoor',
       phone: '+91 9876543210',
-      plan: SubscriptionPlan.professional,
       isApproved: true,
-      trialStartDate: DateTime.now().subtract(const Duration(days: 3)),
     );
 
     final comp1Admin = AppUser(
@@ -401,9 +419,7 @@ RLA CRM Platform
       adminEmail: 'admin@brigade.com',
       adminName: 'Sunita Reddy',
       phone: '+91 9876543211',
-      plan: SubscriptionPlan.starter,
       isApproved: true,
-      trialStartDate: DateTime.now().subtract(const Duration(days: 8)),
     );
 
     final comp2Admin = AppUser(
@@ -430,16 +446,14 @@ RLA CRM Platform
       hasLoggedInBefore: true,
     );
 
-    // ── Demo Company 3: Trial company with first-login popup ───────────────
+    // ── Demo Company 3: Sobha Realty ───────────────────────────────────────
     final company3 = Company(
       id: 'company_003',
       name: 'Sobha Realty',
       adminEmail: 'admin@sobha.com',
       adminName: 'Kiran Patel',
       phone: '+91 9876543212',
-      plan: SubscriptionPlan.trial,
       isApproved: true,
-      trialStartDate: DateTime.now().subtract(const Duration(days: 1)),
     );
 
     final comp3Admin = AppUser(
@@ -451,7 +465,7 @@ RLA CRM Platform
       companyId: 'company_003',
       companyName: 'Sobha Realty',
       isApproved: true,
-      hasLoggedInBefore: false, // will trigger trial popup on first login
+      hasLoggedInBefore: true,
     );
 
     // ── Projects ─────────────────────────────────────────────────────────
@@ -903,9 +917,7 @@ RLA CRM Platform
         adminEmail: req.adminEmail ?? req.applicantEmail,
         adminName: req.applicantName,
         phone: req.phone,
-        plan: SubscriptionPlan.trial,
         isApproved: true,
-        trialStartDate: DateTime.now(),
       );
       _saveCompany(company);
 
@@ -918,7 +930,7 @@ RLA CRM Platform
         companyId: company.id,
         companyName: company.name,
         isApproved: true,
-        hasLoggedInBefore: false, // will trigger trial popup
+        hasLoggedInBefore: false,
       );
       _saveUser(user);
       _saveApproval(req);
@@ -939,7 +951,7 @@ You can now log in with:
 Email: ${req.applicantEmail}
 Password: ${req.password ?? 'changeme123'}
 
-Your 14-day free trial has started. Explore all features and choose a plan that works for you.
+Start managing your real estate leads and projects right away!
 
 Best regards,
 RLA CRM Platform
@@ -1077,8 +1089,8 @@ RLA CRM Platform
       final updated = Company(
         id: c.id, name: c.name, adminEmail: c.adminEmail, adminName: c.adminName,
         phone: c.phone, website: c.website, address: c.address,
-        plan: c.plan, isActive: !c.isActive, isApproved: c.isApproved,
-        createdAt: c.createdAt, trialStartDate: c.trialStartDate,
+        isActive: !c.isActive, isApproved: c.isApproved,
+        createdAt: c.createdAt,
         totalLeads: c.totalLeads, totalUsers: c.totalUsers,
       );
       _saveCompany(updated);
@@ -1086,15 +1098,7 @@ RLA CRM Platform
       notifyListeners();
     } catch (_) {}
   }
-  void updateCompanyPlan(String id, SubscriptionPlan plan) {
-    try {
-      final c = _companies.firstWhere((c) => c.id == id);
-      c.plan = plan;
-      _saveCompany(c);
-      _loadAll();
-      notifyListeners();
-    } catch (_) {}
-  }
+
 
   // ─── Add Project Admin (Master Admin can create companyAdmin for any company) ─
   String? addProjectAdmin({

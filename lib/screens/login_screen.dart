@@ -290,7 +290,7 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
                   Expanded(
                     child: _signupBtn(
                       'Register Project',
-                      'Start your free trial',
+                      'Register your company',
                       Icons.business_outlined,
                       AppColors.gradientPrimary,
                       _showProjectSignup,
@@ -500,7 +500,7 @@ class _ProjectSignupSheetState extends State<_ProjectSignupSheet> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text('Register Your Project', style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                      Text('Start your 14-day free trial · Approval within 24h', style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted)),
+                      Text('Register your company for access · Approval within 24h', style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted)),
                     ],
                   ),
                 ),
@@ -557,7 +557,7 @@ class _ProjectSignupSheetState extends State<_ProjectSignupSheet> {
             const SizedBox(height: 20),
             GradientButton(label: 'Submit Registration', onTap: _signup, isLoading: _loading, icon: Icons.send_outlined),
             const SizedBox(height: 10),
-            Center(child: Text('Free trial · No credit card required',
+            Center(child: Text('Registration is free · Approval within 24h',
                 style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted))),
           ],
         ),
@@ -732,7 +732,7 @@ class _SalesTeamSignupSheetState extends State<_SalesTeamSignupSheet> {
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Text(c.name,       style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w500, color: AppColors.textPrimary)),
-                                Text(c.plan.label, style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
+                                Text(c.adminName, style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
                               ],
                             ),
                           ],
