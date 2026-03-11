@@ -2638,6 +2638,7 @@ class _MasterAlertSheetState extends State<_MasterAlertSheet> {
     final state = widget.state;
 
     List<String> targetIds = [];
+    // ignore: unused_local_variable
     String targetCompanyId = "";
 
     if (_target == "companyAdmins") {
@@ -2800,7 +2801,7 @@ class _MasterAlertSheetState extends State<_MasterAlertSheet> {
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(color: _target == "specificCompany" ? AppColors.lavender : AppColors.border, width: _target == "specificCompany" ? 1.5 : 1),
                   ),
-                  child: Center(child: Text("Specific Company", style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary))),
+                  child: Center(child: Text("Specific Project", style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary))),
                 ),
               )),
             ]),
@@ -2815,7 +2816,7 @@ class _MasterAlertSheetState extends State<_MasterAlertSheet> {
                 child: DropdownButtonHideUnderline(
                   child: DropdownButton<String>(
                     value: _selectedCompanyId,
-                    hint: Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Text("-- Choose company --", style: GoogleFonts.inter(fontSize: 13, color: AppColors.textMuted))),
+                    hint: Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Text("-- Choose project --", style: GoogleFonts.inter(fontSize: 13, color: AppColors.textMuted))),
                     isExpanded: true,
                     padding: const EdgeInsets.symmetric(horizontal: 8),
                     borderRadius: BorderRadius.circular(14),

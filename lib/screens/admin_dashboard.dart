@@ -24,7 +24,7 @@ class _AdminDashboardState extends State<AdminDashboard> with TickerProviderStat
   late AnimationController _fadeCtrl;
   late Animation<double> _fadeAnim;
 
-  static const _tabs = ['Dashboard', 'Projects', 'Leads', 'Analytics', 'Alerts', 'Team', 'Approvals'];
+  static const _tabs = ['Dashboard', 'Projects', 'Leads', 'Analytics', 'Alerts', 'Team', 'Approvals', 'Reports'];
   static const _icons = [
     Icons.dashboard_outlined,
     Icons.apartment_outlined,
@@ -33,6 +33,7 @@ class _AdminDashboardState extends State<AdminDashboard> with TickerProviderStat
     Icons.notifications_outlined,
     Icons.groups_outlined,
     Icons.pending_actions_outlined,
+    Icons.bar_chart_rounded,
   ];
 
   @override
@@ -172,6 +173,7 @@ class _AdminDashboardState extends State<AdminDashboard> with TickerProviderStat
       case 4: return const NotificationsScreen();
       case 5: return const TeamScreen();
       case 6: return const _CompanyApprovalsScreen();
+      case 7: return const _AdminReportsScreen();
       default: return const _AdminHome();
     }
   }
@@ -1023,4 +1025,470 @@ class _ProfileSheet extends StatelessWidget {
       ),
     );
   }
+}
+
+// ─── Admin Reports Screen ─────────────────────────────────────────────────────
+class _AdminReportsScreen extends StatefulWidget {
+  const _AdminReportsScreen();
+  @override
+  State<_AdminReportsScreen> createState() => _AdminReportsScreenState();
+}
+
+class _AdminReportsScreenState extends State<_AdminReportsScreen> {
+  String? _selectedProjectId;
+
+  @override
+  Widget build(BuildContext context) {
+    final state = context.watch<AppState>();
+    final projects = state.companyProjects;
+
+    return SafeArea(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+            child: Row(children: [
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Reports', style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                Text('Generate detailed project reports', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted)),
+              ])),
+              if (_selectedProjectId != null)
+                GradientButton(
+                  label: 'Generate',
+                  icon: Icons.picture_as_pdf_rounded,
+                  height: 36,
+                  onTap: () {
+                    final project = projects.firstWhere((p) => p.id == _selectedProjectId);
+                    _showReportSheet(context, state, project);
+                  },
+                  gradient: AppColors.gradientCTA,
+                ),
+            ]),
+          ),
+          const SizedBox(height: 16),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Select Project', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+              const SizedBox(height: 8),
+              Container(
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: _selectedProjectId == null ? AppColors.border : AppColors.lavender, width: _selectedProjectId == null ? 1 : 1.5),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: _selectedProjectId,
+                    hint: Padding(padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Text('-- Select a project --', style: GoogleFonts.inter(fontSize: 13, color: AppColors.textMuted))),
+                    isExpanded: true,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    borderRadius: BorderRadius.circular(14),
+                    items: projects.map((p) => DropdownMenuItem(
+                      value: p.id,
+                      child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8),
+                        child: Row(children: [
+                          Container(width: 28, height: 28,
+                            decoration: BoxDecoration(gradient: AppColors.gradientPrimary, borderRadius: BorderRadius.circular(7)),
+                            child: Center(child: Text(p.name.isNotEmpty ? p.name[0].toUpperCase() : 'P',
+                                style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white)))),
+                          const SizedBox(width: 10),
+                          Expanded(child: Text(p.name, style: GoogleFonts.inter(fontSize: 13, color: AppColors.textPrimary), overflow: TextOverflow.ellipsis)),
+                        ]),
+                      ),
+                    )).toList(),
+                    onChanged: (v) => setState(() => _selectedProjectId = v),
+                  ),
+                ),
+              ),
+            ]),
+          ),
+          const SizedBox(height: 20),
+          Expanded(
+            child: _selectedProjectId == null
+                ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.bar_chart_rounded, size: 56, color: AppColors.textMuted.withValues(alpha: 0.3)),
+                    const SizedBox(height: 14),
+                    Text('Select a project above', style: GoogleFonts.inter(fontSize: 14, color: AppColors.textMuted)),
+                    const SizedBox(height: 6),
+                    Text('to preview and generate report', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted.withValues(alpha: 0.7))),
+                  ]))
+                : _buildPreview(context, state, projects.firstWhere((p) => p.id == _selectedProjectId)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPreview(BuildContext context, AppState state, RealEstateProject project) {
+    final leads = state.leads.where((l) => l.projectId == project.id).toList();
+    final closedLeads = leads.where((l) => l.status == LeadStatus.closed).length;
+    final siteVisits = leads.where((l) => l.status == LeadStatus.siteVisit).length;
+    final convRate = leads.isEmpty ? 0.0 : (closedLeads / leads.length) * 100;
+    final salesTeam = state.users.where((u) => project.assignedSalesIds.contains(u.id)).toList();
+    final allActivities = <LeadActivity>[];
+    for (final l in leads) { allActivities.addAll(l.activities); }
+    allActivities.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(colors: [AppColors.lavender.withValues(alpha: 0.15), AppColors.pink.withValues(alpha: 0.08)]),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: AppColors.lavender.withValues(alpha: 0.3)),
+          ),
+          child: Row(children: [
+            Container(width: 44, height: 44, decoration: BoxDecoration(gradient: AppColors.gradientPrimary, borderRadius: BorderRadius.circular(11)),
+              child: Center(child: Text(project.name.isNotEmpty ? project.name[0].toUpperCase() : 'P',
+                  style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w800, color: Colors.white)))),
+            const SizedBox(width: 12),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(project.name, style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+              Text(project.location, style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted)),
+              StatusPill(label: project.status.label, color: project.status.color, isSmall: true),
+            ])),
+          ]),
+        ),
+        const SizedBox(height: 12),
+        LayoutBuilder(builder: (ctx, c) => GridView.count(
+          crossAxisCount: c.maxWidth > 400 ? 4 : 2, shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
+          crossAxisSpacing: 8, mainAxisSpacing: 8, childAspectRatio: 1.6,
+          children: [
+            _kpiTile('Total Leads', '${leads.length}', AppColors.gradientPrimary),
+            _kpiTile('Closed', '$closedLeads', AppColors.gradientSuccess),
+            _kpiTile('Site Visits', '$siteVisits', AppColors.gradientTertiary),
+            _kpiTile('Conv.%', '${convRate.toStringAsFixed(1)}%', AppColors.gradientCTA),
+          ],
+        )),
+        const SizedBox(height: 12),
+        Text('Sales Team', style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+        const SizedBox(height: 8),
+        if (salesTeam.isEmpty)
+          Text('No sales team assigned.', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted))
+        else
+          ...salesTeam.map((u) {
+            final uLeads = leads.where((l) => l.assignedToId == u.id).length;
+            final uClosed = leads.where((l) => l.assignedToId == u.id && l.status == LeadStatus.closed).length;
+            return Container(margin: const EdgeInsets.only(bottom: 6), padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.border)),
+              child: Row(children: [
+                AvatarWidget(initials: u.initials, size: 32, gradient: AppColors.gradientTertiary),
+                const SizedBox(width: 10),
+                Expanded(child: Text(u.name, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary))),
+                Text('$uLeads leads · $uClosed closed', style: GoogleFonts.inter(fontSize: 11, color: AppColors.textSecondary)),
+              ]),
+            );
+          }),
+        const SizedBox(height: 12),
+        Text('All Leads (${leads.length})', style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+        const SizedBox(height: 8),
+        if (leads.isEmpty)
+          Text('No leads.', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted))
+        else
+          ...leads.map((lead) => Container(margin: const EdgeInsets.only(bottom: 6), padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.border)),
+            child: Row(children: [
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(lead.name, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                Text('${lead.phone} · ${lead.assignedToName}', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
+                Text(_fmtDate(lead.createdAt), style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
+              ])),
+              StatusPill(label: lead.status.label, color: lead.status.color, isSmall: true),
+            ]),
+          )),
+        const SizedBox(height: 12),
+        Text('Activity Log (${allActivities.length})', style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+        const SizedBox(height: 8),
+        if (allActivities.isEmpty)
+          Text('No activity yet.', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted))
+        else
+          Container(
+            decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.border)),
+            child: Column(children: allActivities.take(30).toList().asMap().entries.map((entry) {
+              final idx = entry.key;
+              final act = entry.value;
+              String leadName = '';
+              try { leadName = leads.firstWhere((l) => l.id == act.leadId).name; } catch (_) {}
+              return Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(border: Border(top: BorderSide(color: idx == 0 ? Colors.transparent : AppColors.border))),
+                child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Container(width: 6, height: 6, margin: const EdgeInsets.only(top: 5), decoration: BoxDecoration(color: AppColors.lavender, shape: BoxShape.circle)),
+                  const SizedBox(width: 8),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(act.action, style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                    if (leadName.isNotEmpty) Text('Lead: $leadName', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textSecondary)),
+                    Text('By: ${act.userName}', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
+                  ])),
+                  Text(_fmtDateTime(act.timestamp), style: GoogleFonts.inter(fontSize: 9, color: AppColors.textMuted)),
+                ]),
+              );
+            }).toList()),
+          ),
+        const SizedBox(height: 30),
+      ]),
+    );
+  }
+
+  Widget _kpiTile(String label, String value, LinearGradient grad) => Container(
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      gradient: LinearGradient(colors: [grad.colors.first.withValues(alpha: 0.12), grad.colors.last.withValues(alpha: 0.07)]),
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: grad.colors.first.withValues(alpha: 0.25)),
+    ),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
+      Text(value, style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+      Text(label, style: GoogleFonts.inter(fontSize: 10, color: AppColors.textSecondary)),
+    ]),
+  );
+
+  void _showReportSheet(BuildContext context, AppState state, RealEstateProject project) {
+    final leads = state.leads.where((l) => l.projectId == project.id).toList();
+    final salesTeam = state.users.where((u) => project.assignedSalesIds.contains(u.id)).toList();
+    showModalBottomSheet(
+      context: context, isScrollControlled: true, backgroundColor: Colors.transparent,
+      builder: (_) => _AdminReportSheet(project: project, leads: leads, salesTeam: salesTeam),
+    );
+  }
+
+  String _fmtDate(DateTime dt) => '${dt.day}/${dt.month}/${dt.year}';
+  String _fmtDateTime(DateTime dt) => '${dt.day}/${dt.month}/${dt.year.toString().substring(2)} ${dt.hour.toString().padLeft(2,'0')}:${dt.minute.toString().padLeft(2,'0')}';
+}
+
+// ─── Admin Report Sheet (with RLA header + P&C footer) ────────────────────────
+class _AdminReportSheet extends StatelessWidget {
+  final RealEstateProject project;
+  final List<Lead> leads;
+  final List<AppUser> salesTeam;
+  const _AdminReportSheet({required this.project, required this.leads, required this.salesTeam});
+
+  @override
+  Widget build(BuildContext context) {
+    final closedLeads = leads.where((l) => l.status == LeadStatus.closed).length;
+    final siteVisits = leads.where((l) => l.status == LeadStatus.siteVisit).length;
+    final convRate = leads.isEmpty ? 0.0 : (closedLeads / leads.length) * 100;
+    final now = DateTime.now();
+    final dateStr = '${now.day}/${now.month}/${now.year}';
+    final timeStr = '${now.hour.toString().padLeft(2,'0')}:${now.minute.toString().padLeft(2,'0')}';
+    final allActivities = <LeadActivity>[];
+    for (final l in leads) { allActivities.addAll(l.activities); }
+    allActivities.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+
+    return Container(
+      margin: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.12), blurRadius: 24, offset: const Offset(0, -4))],
+      ),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Center(child: Container(margin: const EdgeInsets.only(top: 10, bottom: 6), width: 36, height: 4,
+          decoration: BoxDecoration(color: AppColors.border, borderRadius: BorderRadius.circular(2)))),
+        Padding(padding: const EdgeInsets.fromLTRB(20, 4, 12, 0),
+          child: Row(children: [
+            Text('Report Preview', style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+            const Spacer(),
+            IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close_rounded, color: AppColors.textMuted)),
+          ])),
+        const Divider(height: 1),
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              // RLA Header
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                decoration: BoxDecoration(gradient: AppColors.gradientPrimary, borderRadius: BorderRadius.circular(14)),
+                child: Row(children: [
+                  Container(width: 44, height: 44,
+                    decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(11)),
+                    child: Center(child: Text('R', style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.w900, color: Colors.white)))),
+                  const SizedBox(width: 14),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('RLA CRM', style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w800, color: Colors.white, letterSpacing: 1.0)),
+                    Text('Real Estate · Leads · Growth', style: GoogleFonts.inter(fontSize: 10, color: Colors.white.withValues(alpha: 0.8))),
+                  ])),
+                  Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                    Text('PROJECT REPORT', style: GoogleFonts.inter(fontSize: 9, fontWeight: FontWeight.w700, color: Colors.white.withValues(alpha: 0.8), letterSpacing: 1.2)),
+                    Text('$dateStr · $timeStr', style: GoogleFonts.inter(fontSize: 9, color: Colors.white.withValues(alpha: 0.7))),
+                  ]),
+                ]),
+              ),
+              const SizedBox(height: 20),
+              // Project Info
+              _sectionTitle('Project Information'),
+              const SizedBox(height: 10),
+              _infoRow('Project Name', project.name),
+              _infoRow('Location', project.location),
+              if (project.developerName.isNotEmpty) _infoRow('Developer', project.developerName),
+              if (project.reraNumber != null && project.reraNumber!.isNotEmpty) _infoRow('RERA No.', project.reraNumber!),
+              _infoRow('Property Type', project.propertyType.label),
+              _infoRow('Status', project.status.label),
+              if (project.priceDisplay.isNotEmpty) _infoRow('Price Range', project.priceDisplay),
+              const SizedBox(height: 16),
+              // KPIs
+              _sectionTitle('Performance Summary'),
+              const SizedBox(height: 10),
+              Row(children: [
+                Expanded(child: _kpiBox('Total', '${leads.length}', AppColors.lavender)),
+                const SizedBox(width: 8),
+                Expanded(child: _kpiBox('Visits', '$siteVisits', AppColors.sky)),
+                const SizedBox(width: 8),
+                Expanded(child: _kpiBox('Closed', '$closedLeads', AppColors.mint)),
+                const SizedBox(width: 8),
+                Expanded(child: _kpiBox('Conv.%', '${convRate.toStringAsFixed(1)}%', AppColors.peach)),
+              ]),
+              const SizedBox(height: 16),
+              // Lead Status
+              _sectionTitle('Lead Status Breakdown'),
+              const SizedBox(height: 10),
+              ...LeadStatus.values.map((s) {
+                final cnt = leads.where((l) => l.status == s).length;
+                return Padding(padding: const EdgeInsets.only(bottom: 6), child: Row(children: [
+                  Container(width: 8, height: 8, decoration: BoxDecoration(color: s.color, shape: BoxShape.circle)),
+                  const SizedBox(width: 8),
+                  SizedBox(width: 90, child: Text(s.label, style: GoogleFonts.inter(fontSize: 12, color: AppColors.textSecondary))),
+                  Expanded(child: Stack(children: [
+                    Container(height: 6, decoration: BoxDecoration(color: AppColors.border, borderRadius: BorderRadius.circular(3))),
+                    FractionallySizedBox(widthFactor: leads.isEmpty ? 0.0 : (cnt / leads.length).clamp(0.0, 1.0),
+                      child: Container(height: 6, decoration: BoxDecoration(color: s.color, borderRadius: BorderRadius.circular(3)))),
+                  ])),
+                  const SizedBox(width: 8),
+                  Text('$cnt', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                ]));
+              }),
+              const SizedBox(height: 16),
+              // Sales Team
+              _sectionTitle('Sales Team Performance'),
+              const SizedBox(height: 10),
+              if (salesTeam.isEmpty)
+                Text('No sales team assigned.', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted))
+              else
+                ...salesTeam.map((u) {
+                  final uLeads = leads.where((l) => l.assignedToId == u.id).length;
+                  final uClosed = leads.where((l) => l.assignedToId == u.id && l.status == LeadStatus.closed).length;
+                  final uVisits = leads.where((l) => l.assignedToId == u.id && l.status == LeadStatus.siteVisit).length;
+                  return Container(margin: const EdgeInsets.only(bottom: 8), padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.border)),
+                    child: Row(children: [
+                      AvatarWidget(initials: u.initials, size: 32, gradient: AppColors.gradientTertiary),
+                      const SizedBox(width: 10),
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(u.name, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                        Text(u.email, style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
+                      ])),
+                      Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                        Text('$uLeads leads · $uClosed closed', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                        Text('$uVisits visits', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
+                      ]),
+                    ]),
+                  );
+                }),
+              const SizedBox(height: 16),
+              // All Leads
+              _sectionTitle('All Leads (${leads.length})'),
+              const SizedBox(height: 10),
+              if (leads.isEmpty)
+                Text('No leads.', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted))
+              else
+                ...leads.map((lead) => Container(margin: const EdgeInsets.only(bottom: 8), padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.border)),
+                  child: Row(children: [
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(lead.name, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                      Text('${lead.phone}${lead.email.isNotEmpty ? " · ${lead.email}" : ""}', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
+                      Text('Assigned: ${lead.assignedToName} · ${_fmtDate(lead.createdAt)}', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
+                      Text('Source: ${lead.source.label}', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
+                    ])),
+                    StatusPill(label: lead.status.label, color: lead.status.color, isSmall: true),
+                  ]),
+                )),
+              const SizedBox(height: 16),
+              // Activity Log
+              _sectionTitle('Sales Activity Log (${allActivities.length})'),
+              const SizedBox(height: 10),
+              if (allActivities.isEmpty)
+                Text('No activity recorded.', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted))
+              else
+                ...allActivities.take(100).toList().asMap().entries.map((entry) {
+                  final act = entry.value;
+                  String leadName = '';
+                  try { leadName = leads.firstWhere((l) => l.id == act.leadId).name; } catch (_) {}
+                  return Container(margin: const EdgeInsets.only(bottom: 6), padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.border)),
+                    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Container(width: 6, height: 6, margin: const EdgeInsets.only(top: 5), decoration: BoxDecoration(color: AppColors.lavender, shape: BoxShape.circle)),
+                      const SizedBox(width: 8),
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(act.action, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                        if (leadName.isNotEmpty) Text('Lead: $leadName', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textSecondary)),
+                        Text('By: ${act.userName}', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
+                        if (act.note != null && act.note!.isNotEmpty)
+                          Text('Note: ${act.note}', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted, fontStyle: FontStyle.italic)),
+                      ])),
+                      Text(_fmtDateTime(act.timestamp), style: GoogleFonts.inter(fontSize: 9, color: AppColors.textMuted)),
+                    ]),
+                  );
+                }),
+              const SizedBox(height: 24),
+              // P&C Footer
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.border)),
+                child: Column(children: [
+                  const Divider(height: 1),
+                  const SizedBox(height: 8),
+                  Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                    const Icon(Icons.lock_outline_rounded, size: 12, color: AppColors.textMuted),
+                    const SizedBox(width: 6),
+                    Text('Private & Confidential', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.textMuted, letterSpacing: 0.5)),
+                    const SizedBox(width: 6),
+                    const Icon(Icons.lock_outline_rounded, size: 12, color: AppColors.textMuted),
+                  ]),
+                  const SizedBox(height: 4),
+                  Text('This report is intended solely for authorised personnel of RLA CRM.', style: GoogleFonts.inter(fontSize: 9, color: AppColors.textMuted.withValues(alpha: 0.7)), textAlign: TextAlign.center),
+                  Text('Unauthorised use, disclosure or distribution is strictly prohibited.', style: GoogleFonts.inter(fontSize: 9, color: AppColors.textMuted.withValues(alpha: 0.7)), textAlign: TextAlign.center),
+                  const SizedBox(height: 4),
+                  Text('Generated by RLA CRM · $dateStr', style: GoogleFonts.inter(fontSize: 9, color: AppColors.textMuted.withValues(alpha: 0.5))),
+                ]),
+              ),
+              const SizedBox(height: 16),
+            ]),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  Widget _sectionTitle(String title) => Row(children: [
+    Container(width: 3, height: 16, decoration: BoxDecoration(gradient: AppColors.gradientPrimary, borderRadius: BorderRadius.circular(2))),
+    const SizedBox(width: 8),
+    Text(title, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+  ]);
+
+  Widget _infoRow(String label, String value) => Padding(padding: const EdgeInsets.only(bottom: 6),
+    child: Row(children: [
+      SizedBox(width: 100, child: Text(label, style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted))),
+      Expanded(child: Text(value, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary))),
+    ]));
+
+  Widget _kpiBox(String label, String value, Color color) => Container(
+    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+    decoration: BoxDecoration(color: color.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(10), border: Border.all(color: color.withValues(alpha: 0.3))),
+    child: Column(children: [
+      Text(value, style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+      Text(label, style: GoogleFonts.inter(fontSize: 9, color: AppColors.textMuted)),
+    ]),
+  );
+
+  String _fmtDate(DateTime dt) => '${dt.day}/${dt.month}/${dt.year}';
+  String _fmtDateTime(DateTime dt) => '${dt.day}/${dt.month}/${dt.year.toString().substring(2)} ${dt.hour.toString().padLeft(2,'0')}:${dt.minute.toString().padLeft(2,'0')}';
 }
