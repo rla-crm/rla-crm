@@ -864,20 +864,26 @@ RLA CRM Platform
   }
 
 
-  // ─── Add Project Admin (Master Admin can create companyAdmin for any company) ─
+  // ─── Add Project Admin (Master Admin can create companyAdmin for any project) ─
   String? addProjectAdmin({
     required String name,
     required String email,
     required String password,
-    required String companyId,
+    String? companyId,    // legacy param — maps to projectId
+    String? projectId,    // preferred param
   }) {
     if (!isMasterAdmin) return 'Unauthorized';
     if (_users.any((u) => u.email.toLowerCase() == email.toLowerCase())) {
       return 'Email already registered';
     }
-    Company company;
+    final resolvedProjectId = projectId ?? companyId;
+    if (resolvedProjectId == null || resolvedProjectId.isEmpty) {
+      return 'Project not selected';
+    }
+    // Look up from projects list
+    RealEstateProject? project;
     try {
-      company = _companies.firstWhere((c) => c.id == companyId);
+      project = _projects.firstWhere((p) => p.id == resolvedProjectId);
     } catch (_) {
       return 'Project not found';
     }
@@ -886,12 +892,17 @@ RLA CRM Platform
       email: email,
       password: password,
       role: UserRole.companyAdmin,
-      companyId: companyId,
-      companyName: company.name,
+      companyId: resolvedProjectId,   // stored as companyId for backwards compat
+      companyName: project.name,
       isApproved: true,
       hasLoggedInBefore: false,
     );
     _saveUser(user);
+    // Also update the project's companyId to this project's own ID so lookups work
+    if (project.companyId == 'rla_platform') {
+      project.updatedAt = DateTime.now();
+      _saveProject(project);
+    }
     _loadAll();
     notifyListeners();
     _sendEmail(
@@ -901,7 +912,7 @@ RLA CRM Platform
       body: '''
 Hello $name,
 
-You have been added as a Project Admin for "${company.name}" on RLA CRM by ${_currentUser?.name ?? 'Master Admin'}.
+You have been added as a Project Admin for "${project.name}" on RLA CRM by ${_currentUser?.name ?? 'Master Admin'}.
 
 Login credentials:
 Email: $email

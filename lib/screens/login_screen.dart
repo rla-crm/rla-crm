@@ -290,7 +290,7 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
                   Expanded(
                     child: _signupBtn(
                       'Register Project',
-                      'Register your company',
+                      'Register your project',
                       Icons.business_outlined,
                       AppColors.gradientPrimary,
                       _showProjectSignup,
@@ -500,7 +500,7 @@ class _ProjectSignupSheetState extends State<_ProjectSignupSheet> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text('Register Your Project', style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                      Text('Register your company for access · Approval within 24h', style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted)),
+                      Text('Register your project for access · Approval within 24h', style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted)),
                     ],
                   ),
                 ),
@@ -526,7 +526,7 @@ class _ProjectSignupSheetState extends State<_ProjectSignupSheet> {
               ]),
             ),
             const SizedBox(height: 16),
-            _sheetField(_companyCtrl, 'Project / Company Name *', Icons.business_outlined),
+            _sheetField(_companyCtrl, 'Project Name *', Icons.apartment_outlined),
             const SizedBox(height: 12),
             _sheetField(_nameCtrl, 'Your Name *',    Icons.person_outline_rounded),
             const SizedBox(height: 12),

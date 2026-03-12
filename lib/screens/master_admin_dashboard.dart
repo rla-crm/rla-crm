@@ -1900,7 +1900,7 @@ class _AddMasterAdminSheetState extends State<_AddMasterAdminSheet> {
               child: Row(children: [
                 const Icon(Icons.warning_amber_rounded, size: 16, color: Color(0xFFD08020)),
                 const SizedBox(width: 8),
-                Expanded(child: Text('This user will have complete platform access including all companies, approvals, and user management.', style: GoogleFonts.inter(fontSize: 11, color: const Color(0xFFD08020)))),
+                Expanded(child: Text('This user will have complete platform access including all projects, approvals, and user management.', style: GoogleFonts.inter(fontSize: 11, color: const Color(0xFFD08020)))),
               ]),
             ),
             const SizedBox(height: 16),
@@ -1956,7 +1956,7 @@ class _AddProjectAdminSheetState extends State<_AddProjectAdminSheet> {
   bool _obscure = true;
   bool _loading = false;
   String? _error;
-  String? _selectedCompanyId;
+  String? _selectedProjectId;
 
   @override
   void dispose() {
@@ -1969,7 +1969,7 @@ class _AddProjectAdminSheetState extends State<_AddProjectAdminSheet> {
       setState(() => _error = 'All fields are required');
       return;
     }
-    if (_selectedCompanyId == null) {
+    if (_selectedProjectId == null) {
       setState(() => _error = 'Please select a project');
       return;
     }
@@ -1984,7 +1984,7 @@ class _AddProjectAdminSheetState extends State<_AddProjectAdminSheet> {
       name: _nameCtrl.text.trim(),
       email: _emailCtrl.text.trim(),
       password: _passCtrl.text.trim(),
-      companyId: _selectedCompanyId!,
+      projectId: _selectedProjectId!,
     );
     if (!mounted) return;
     if (err != null) {
@@ -2004,7 +2004,7 @@ class _AddProjectAdminSheetState extends State<_AddProjectAdminSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final companies = context.read<AppState>().companies.where((c) => c.isApproved && c.isActive).toList();
+    final projects = context.read<AppState>().projects.toList();
     return Container(
       margin: const EdgeInsets.all(16),
       decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(24)),
@@ -2056,12 +2056,12 @@ class _AddProjectAdminSheetState extends State<_AddProjectAdminSheet> {
               decoration: BoxDecoration(
                 color: AppColors.surface,
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: _selectedCompanyId == null ? AppColors.border : AppColors.lavender,
-                    width: _selectedCompanyId == null ? 1 : 1.5),
+                border: Border.all(color: _selectedProjectId == null ? AppColors.border : AppColors.lavender,
+                    width: _selectedProjectId == null ? 1 : 1.5),
               ),
               child: DropdownButtonHideUnderline(
                 child: DropdownButton<String>(
-                  value: _selectedCompanyId,
+                  value: _selectedProjectId,
                   hint: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     child: Text('-- Choose project --', style: GoogleFonts.inter(fontSize: 13, color: AppColors.textMuted)),
@@ -2069,8 +2069,8 @@ class _AddProjectAdminSheetState extends State<_AddProjectAdminSheet> {
                   isExpanded: true,
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                   borderRadius: BorderRadius.circular(14),
-                  items: companies.map((c) => DropdownMenuItem(
-                    value: c.id,
+                  items: projects.map((p) => DropdownMenuItem(
+                    value: p.id,
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 8),
                       child: Row(
@@ -2078,15 +2078,22 @@ class _AddProjectAdminSheetState extends State<_AddProjectAdminSheet> {
                           Container(
                             width: 28, height: 28,
                             decoration: BoxDecoration(gradient: AppColors.gradientPrimary, borderRadius: BorderRadius.circular(7)),
-                            child: Center(child: Text(c.initials, style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white))),
+                            child: Center(child: Text(p.name.isNotEmpty ? p.name[0].toUpperCase() : 'P', style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white))),
                           ),
                           const SizedBox(width: 10),
-                          Text(c.name, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w500, color: AppColors.textPrimary)),
+                          Expanded(child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(p.name, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w500, color: AppColors.textPrimary), maxLines: 1, overflow: TextOverflow.ellipsis),
+                              Text(p.location, style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted), maxLines: 1, overflow: TextOverflow.ellipsis),
+                            ],
+                          )),
                         ],
                       ),
                     ),
                   )).toList(),
-                  onChanged: (v) => setState(() => _selectedCompanyId = v),
+                  onChanged: (v) => setState(() => _selectedProjectId = v),
                 ),
               ),
             ),
@@ -2138,6 +2145,18 @@ class _MasterProjectsScreen extends StatefulWidget {
 class _MasterProjectsScreenState extends State<_MasterProjectsScreen> {
   String _search = '';
 
+  // Helper: get the project admin name for a given companyId (or project ID)
+  String _projectAdminName(AppState state, String projectId) {
+    try {
+      final admin = state.users.firstWhere(
+        (u) => u.companyId == projectId && u.role == UserRole.companyAdmin && u.isApproved,
+      );
+      return admin.name;
+    } catch (_) {
+      return 'No admin assigned';
+    }
+  }
+
   void _showProjectSheet(BuildContext context, AppState state, RealEstateProject? existing) {
     final nameCtrl = TextEditingController(text: existing?.name ?? '');
     final locCtrl = TextEditingController(text: existing?.location ?? '');
@@ -2147,7 +2166,6 @@ class _MasterProjectsScreenState extends State<_MasterProjectsScreen> {
     PropertyType propType = existing?.propertyType ?? PropertyType.apartment;
     ProjectStatus projStatus = existing?.status ?? ProjectStatus.active;
     List<String> assignedIds = List.from(existing?.assignedSalesIds ?? []);
-    String? selectedCompanyId = existing?.companyId.isNotEmpty == true ? existing!.companyId : null;
 
     showModalBottomSheet(
       context: context,
@@ -2155,8 +2173,9 @@ class _MasterProjectsScreenState extends State<_MasterProjectsScreen> {
       backgroundColor: Colors.transparent,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) {
-          final salesForSheet = selectedCompanyId != null
-              ? state.users.where((u) => u.companyId == selectedCompanyId && u.role == UserRole.sales && u.isApproved).toList()
+          // Sales team: when editing, show members linked to this project; when creating, empty
+          final salesForSheet = existing != null
+              ? state.users.where((u) => u.companyId == existing.companyId && u.role == UserRole.sales && u.isApproved).toList()
               : <AppUser>[];
           return Padding(
             padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
@@ -2182,34 +2201,7 @@ class _MasterProjectsScreenState extends State<_MasterProjectsScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('Assign to Company *', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
-                          const SizedBox(height: 8),
-                          Container(
-                            decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(14),
-                                border: Border.all(color: selectedCompanyId == null ? AppColors.border : AppColors.lavender, width: selectedCompanyId == null ? 1 : 1.5)),
-                            child: DropdownButtonHideUnderline(
-                              child: DropdownButton<String>(
-                                value: selectedCompanyId,
-                                hint: Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Text('-- Select company --', style: GoogleFonts.inter(fontSize: 13, color: AppColors.textMuted))),
-                                isExpanded: true,
-                                padding: const EdgeInsets.symmetric(horizontal: 8),
-                                borderRadius: BorderRadius.circular(14),
-                                items: state.companies.where((c) => c.isApproved && c.isActive).map((c) =>
-                                  DropdownMenuItem(value: c.id, child: Padding(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                                    child: Row(children: [
-                                      Container(width: 28, height: 28, decoration: BoxDecoration(gradient: AppColors.gradientPrimary, borderRadius: BorderRadius.circular(7)),
-                                          child: Center(child: Text(c.initials, style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white)))),
-                                      const SizedBox(width: 10),
-                                      Text(c.name, style: GoogleFonts.inter(fontSize: 13, color: AppColors.textPrimary)),
-                                    ]),
-                                  )),
-                                ).toList(),
-                                onChanged: (v) => setS(() { selectedCompanyId = v; assignedIds.clear(); }),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 14),
+                          // ── Project Details ────────────────────────────────
                           TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Project Name *', prefixIcon: Icon(Icons.apartment_outlined, size: 17, color: AppColors.textMuted))),
                           const SizedBox(height: 12),
                           TextField(controller: locCtrl, decoration: const InputDecoration(labelText: 'Location *', prefixIcon: Icon(Icons.location_on_outlined, size: 17, color: AppColors.textMuted))),
@@ -2249,48 +2241,48 @@ class _MasterProjectsScreenState extends State<_MasterProjectsScreen> {
                               ));
                             }).toList()),
                           ],
-                          const SizedBox(height: 16),
-                          Text('Assign Sales Team', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
-                          const SizedBox(height: 8),
-                          if (selectedCompanyId == null)
-                            Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: AppColors.peach.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.peach.withValues(alpha: 0.3))),
-                              child: Text('Select a company above to assign sales team members.', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textSecondary)))
-                          else if (salesForSheet.isEmpty)
-                            Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.border)),
-                              child: Text('No approved sales team members in this company.', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted)))
-                          else
-                            ...salesForSheet.map((u) {
-                              final isSel = assignedIds.contains(u.id);
-                              return Padding(padding: const EdgeInsets.only(bottom: 6), child: GestureDetector(
-                                onTap: () => setS(() { if (isSel) assignedIds.remove(u.id); else assignedIds.add(u.id); }),
-                                child: AnimatedContainer(duration: const Duration(milliseconds: 200), padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                                  decoration: BoxDecoration(color: isSel ? AppColors.lavender.withValues(alpha: 0.1) : AppColors.background, borderRadius: BorderRadius.circular(12), border: Border.all(color: isSel ? AppColors.lavender.withValues(alpha: 0.5) : AppColors.border)),
-                                  child: Row(children: [
-                                    AvatarWidget(initials: u.initials, size: 32, gradient: AppColors.gradientTertiary),
-                                    const SizedBox(width: 10),
-                                    Expanded(child: Text(u.name, style: GoogleFonts.inter(fontSize: 13, fontWeight: isSel ? FontWeight.w600 : FontWeight.w400, color: AppColors.textPrimary))),
-                                    if (isSel) const Icon(Icons.check_circle_rounded, color: AppColors.lavender, size: 18),
-                                  ]),
-                                ),
-                              ));
-                            }),
+                          // ── Sales Team (only shown when editing) ───────────
+                          if (existing != null) ...[
+                            const SizedBox(height: 16),
+                            Text('Assign Sales Team', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+                            const SizedBox(height: 8),
+                            if (salesForSheet.isEmpty)
+                              Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.border)),
+                                child: Text('No approved sales team members yet. The Project Admin can add sales members after login.', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted)))
+                            else
+                              ...salesForSheet.map((u) {
+                                final isSel = assignedIds.contains(u.id);
+                                return Padding(padding: const EdgeInsets.only(bottom: 6), child: GestureDetector(
+                                  onTap: () => setS(() { if (isSel) assignedIds.remove(u.id); else assignedIds.add(u.id); }),
+                                  child: AnimatedContainer(duration: const Duration(milliseconds: 200), padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                    decoration: BoxDecoration(color: isSel ? AppColors.lavender.withValues(alpha: 0.1) : AppColors.background, borderRadius: BorderRadius.circular(12), border: Border.all(color: isSel ? AppColors.lavender.withValues(alpha: 0.5) : AppColors.border)),
+                                    child: Row(children: [
+                                      AvatarWidget(initials: u.initials, size: 32, gradient: AppColors.gradientTertiary),
+                                      const SizedBox(width: 10),
+                                      Expanded(child: Text(u.name, style: GoogleFonts.inter(fontSize: 13, fontWeight: isSel ? FontWeight.w600 : FontWeight.w400, color: AppColors.textPrimary))),
+                                      if (isSel) const Icon(Icons.check_circle_rounded, color: AppColors.lavender, size: 18),
+                                    ]),
+                                  ),
+                                ));
+                              }),
+                          ],
                           const SizedBox(height: 20),
                           GradientButton(
                             label: existing == null ? 'Create Project' : 'Update Project',
                             icon: existing == null ? Icons.add_rounded : Icons.check_rounded,
                             onTap: () {
                               if (nameCtrl.text.trim().isEmpty || locCtrl.text.trim().isEmpty) return;
-                              final companyId = selectedCompanyId ?? '';
-                              if (companyId.isEmpty) return;
                               if (existing == null) {
-                                state.addProject(RealEstateProject(
+                                // Create new standalone project — admin assigned separately via Users tab
+                                final newProject = RealEstateProject(
                                   name: nameCtrl.text.trim(), location: locCtrl.text.trim(),
                                   developerName: devCtrl.text.trim(),
                                   priceFrom: double.tryParse(priceFromCtrl.text), priceTo: double.tryParse(priceToCtrl.text),
-                                  propertyType: propType, assignedSalesIds: assignedIds,
+                                  propertyType: propType, assignedSalesIds: [],
                                   createdById: state.currentUser!.id, createdByName: state.currentUser!.name,
-                                  companyId: companyId,
-                                ));
+                                  companyId: 'rla_platform',
+                                );
+                                state.addProject(newProject);
                               } else {
                                 existing.name = nameCtrl.text.trim(); existing.location = locCtrl.text.trim();
                                 existing.developerName = devCtrl.text.trim();
@@ -2340,7 +2332,7 @@ class _MasterProjectsScreenState extends State<_MasterProjectsScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text('All Projects', style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                      Text('${state.projects.length} projects across all companies', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted)),
+                      Text('${state.projects.length} active projects on the platform', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted)),
                     ],
                   ),
                 ),
@@ -2381,8 +2373,8 @@ class _MasterProjectsScreenState extends State<_MasterProjectsScreen> {
                     itemCount: projects.length,
                     itemBuilder: (ctx, i) {
                       final p = projects[i];
-                      Company? company;
-                      try { company = state.companies.firstWhere((c) => c.id == p.companyId); } catch (_) {}
+                      // Find admin for this project
+                      final adminName = _projectAdminName(state, p.companyId);
                       final leads = state.leads.where((l) => l.projectId == p.id).toList();
                       return Container(
                         margin: const EdgeInsets.only(bottom: 12),
@@ -2405,12 +2397,11 @@ class _MasterProjectsScreenState extends State<_MasterProjectsScreen> {
                                 children: [
                                   Text(p.name, style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
                                   const SizedBox(height: 2),
-                                  if (company != null)
-                                    Row(children: [
-                                      const Icon(Icons.business_outlined, size: 12, color: AppColors.textMuted),
-                                      const SizedBox(width: 4),
-                                      Text(company.name, style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted)),
-                                    ]),
+                                  Row(children: [
+                                    const Icon(Icons.person_outline_rounded, size: 12, color: AppColors.textMuted),
+                                    const SizedBox(width: 4),
+                                    Text(adminName, style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted)),
+                                  ]),
                                   const SizedBox(height: 4),
                                   Row(children: [
                                     const Icon(Icons.location_on_outlined, size: 12, color: AppColors.textMuted),
@@ -2457,7 +2448,8 @@ class _MasterReportsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
-    final companies = state.approvedCompanies;
+    // Use ALL projects directly — no longer grouped by company
+    final allProjects = state.projects;
 
     return SafeArea(
       child: SingleChildScrollView(
@@ -2465,29 +2457,30 @@ class _MasterReportsScreen extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Company Reports', style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-            Text('Performance summary per company', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted)),
+            Text('Project Reports', style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+            Text('Performance summary per project', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted)),
             const SizedBox(height: 16),
 
-            if (companies.isEmpty)
+            if (allProjects.isEmpty)
               Center(
                 child: Column(mainAxisSize: MainAxisSize.min, children: [
                   Icon(Icons.bar_chart_rounded, size: 48, color: AppColors.textMuted.withValues(alpha: 0.4)),
                   const SizedBox(height: 12),
-                  Text('No companies yet', style: GoogleFonts.inter(color: AppColors.textMuted)),
+                  Text('No projects yet. Use the Projects tab to create your first project.', style: GoogleFonts.inter(color: AppColors.textMuted)),
                 ]),
               )
             else
-              ...companies.map((company) {
-                final companyUsers = state.users.where((u) => u.companyId == company.id && u.isApproved).toList();
-                final companyLeads = state.leads.where((l) => l.companyId == company.id).toList();
-                final closedLeads = companyLeads.where((l) => l.status == LeadStatus.closed).length;
-                final siteVisits = companyLeads.where((l) => l.status == LeadStatus.siteVisit).length;
-                final newLeads = companyLeads.where((l) => l.status == LeadStatus.newLead).length;
-                final convRate = companyLeads.isEmpty ? 0.0 : (closedLeads / companyLeads.length) * 100;
-                final companyProjects = state.projects.where((p) => p.companyId == company.id).toList();
-                final activeProjects = companyProjects.where((p) => p.status == ProjectStatus.active).length;
-                final salesTeam = companyUsers.where((u) => u.role == UserRole.sales).length;
+              ...allProjects.map((project) {
+                // Users linked to this project (via companyId = project.id)
+                final projectUsers = state.users.where((u) => u.companyId == project.id && u.isApproved).toList();
+                // Also include users linked via the legacy 'rla_platform' companyId (standalone projects)
+                final projectLeads = state.leads.where((l) => l.projectId == project.id).toList();
+                final closedLeads = projectLeads.where((l) => l.status == LeadStatus.closed).length;
+                final siteVisits = projectLeads.where((l) => l.status == LeadStatus.siteVisit).length;
+                final newLeads = projectLeads.where((l) => l.status == LeadStatus.newLead).length;
+                final convRate = projectLeads.isEmpty ? 0.0 : (closedLeads / projectLeads.length) * 100;
+                final salesTeam = projectUsers.where((u) => u.role == UserRole.sales).length;
+                final adminUser = projectUsers.where((u) => u.role == UserRole.companyAdmin).firstOrNull;
 
                 return Container(
                   margin: const EdgeInsets.only(bottom: 16),
@@ -2504,24 +2497,31 @@ class _MasterReportsScreen extends StatelessWidget {
                         padding: const EdgeInsets.all(16),
                         child: Row(
                           children: [
-                            AvatarWidget(initials: company.initials, size: 46, gradient: AppColors.gradientSecondary),
+                            Container(
+                              width: 46, height: 46,
+                              decoration: BoxDecoration(gradient: AppColors.gradientPrimary, borderRadius: BorderRadius.circular(13)),
+                              child: Center(child: Text(project.name.isNotEmpty ? project.name[0].toUpperCase() : 'P',
+                                  style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w700, color: Colors.white))),
+                            ),
                             const SizedBox(width: 12),
                             Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(company.name, style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                                  Text(company.adminEmail, style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted)),
-                                  const SizedBox(height: 4),
-                                  Row(children: [
-                                    const Icon(Icons.calendar_today_outlined, size: 11, color: AppColors.textMuted),
-                                    const SizedBox(width: 4),
-                                    Text('Since ${_fmtDate(company.createdAt)} · ${company.daysElapsed}d active', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
-                                  ]),
+                                  Text(project.name, style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                                  Text(project.location, style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted)),
+                                  if (adminUser != null) ...[
+                                    const SizedBox(height: 2),
+                                    Row(children: [
+                                      const Icon(Icons.person_outline_rounded, size: 11, color: AppColors.lavender),
+                                      const SizedBox(width: 4),
+                                      Text('Admin: ${adminUser.name}', style: GoogleFonts.inter(fontSize: 10, color: AppColors.lavender)),
+                                    ]),
+                                  ],
                                 ],
                               ),
                             ),
-                            StatusPill(label: company.isActive ? 'Active' : 'Inactive', color: company.isActive ? AppColors.mint : AppColors.stageLost, isSmall: true),
+                            StatusPill(label: project.status.label, color: project.status.color, isSmall: true),
                           ],
                         ),
                       ),
@@ -2537,11 +2537,9 @@ class _MasterReportsScreen extends StatelessWidget {
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceAround,
                               children: [
-                                _reportStat('Projects', '$activeProjects/${companyProjects.length}', AppColors.gradientPrimary),
-                                _vDivider(),
                                 _reportStat('Sales Team', '$salesTeam', AppColors.gradientTertiary),
                                 _vDivider(),
-                                _reportStat('Total Leads', '${companyLeads.length}', AppColors.gradientSecondary),
+                                _reportStat('Total Leads', '${projectLeads.length}', AppColors.gradientSecondary),
                                 _vDivider(),
                                 _reportStat('Closures', '$closedLeads', AppColors.gradientSuccess),
                                 _vDivider(),
@@ -2550,7 +2548,7 @@ class _MasterReportsScreen extends StatelessWidget {
                             ),
                             const SizedBox(height: 10),
                             // Mini lead pipeline
-                            if (companyLeads.isNotEmpty) ...[
+                            if (projectLeads.isNotEmpty) ...[
                               const Divider(height: 1),
                               const SizedBox(height: 8),
                               Row(
@@ -2652,22 +2650,22 @@ class _MasterAlertSheetState extends State<_MasterAlertSheet> {
 
     if (targetIds.isEmpty) return;
 
-    // Create a notification per company (grouped by companyId)
-    final companies = _target == "companyAdmins"
-        ? state.companies.where((c) => c.isApproved && c.isActive).toList()
-        : state.companies.where((c) => c.id == _selectedCompanyId).toList();
+    // Create a notification per project
+    final projectsToNotify = _target == "companyAdmins"
+        ? state.projects.toList()
+        : state.projects.where((p) => p.id == _selectedCompanyId).toList();
 
-    for (final company in companies) {
-      final companyAdminIds = targetIds.where((id) {
+    for (final project in projectsToNotify) {
+      final projectAdminIds = targetIds.where((id) {
         final u = state.users.where((u) => u.id == id).isNotEmpty
             ? state.users.firstWhere((u) => u.id == id)
             : null;
-        return u?.companyId == company.id;
+        return u?.companyId == project.id;
       }).toList();
 
-      if (companyAdminIds.isEmpty && _target != "companyAdmins") continue;
+      if (projectAdminIds.isEmpty && _target != "companyAdmins") continue;
 
-      final ids = _target == "companyAdmins" ? companyAdminIds : targetIds;
+      final ids = _target == "companyAdmins" ? projectAdminIds : targetIds;
       if (ids.isEmpty) continue;
 
       final notif = CrmNotification(
@@ -2678,7 +2676,7 @@ class _MasterAlertSheetState extends State<_MasterAlertSheet> {
         isForAll: false,
         targetUserIds: ids,
         priority: _priority,
-        companyId: company.id,
+        companyId: project.id,
         isAlert: true,
       );
       state.addNotification(notif);
@@ -2692,7 +2690,7 @@ class _MasterAlertSheetState extends State<_MasterAlertSheet> {
         Text(
           _target == "companyAdmins"
               ? "Alert sent to all Project Admins"
-              : "Alert sent to ${state.companies.where((c) => c.id == _selectedCompanyId).isNotEmpty ? state.companies.firstWhere((c) => c.id == _selectedCompanyId).name : "company"} admin",
+              : "Alert sent to ${state.projects.where((p) => p.id == _selectedCompanyId).isNotEmpty ? state.projects.firstWhere((p) => p.id == _selectedCompanyId).name : "project"} admin",
           style: GoogleFonts.inter(fontSize: 12),
         ),
       ]),
@@ -2704,7 +2702,7 @@ class _MasterAlertSheetState extends State<_MasterAlertSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final companies = widget.state.companies.where((c) => c.isApproved && c.isActive).toList();
+    final projects = widget.state.projects.toList();
     return Container(
       margin: const EdgeInsets.all(16),
       decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(24)),
@@ -2813,11 +2811,11 @@ class _MasterAlertSheetState extends State<_MasterAlertSheet> {
                     isExpanded: true,
                     padding: const EdgeInsets.symmetric(horizontal: 8),
                     borderRadius: BorderRadius.circular(14),
-                    items: companies.map((c) => DropdownMenuItem(
-                      value: c.id,
+                    items: projects.map((p) => DropdownMenuItem(
+                      value: p.id,
                       child: Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 8),
-                        child: Text(c.name, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w500)),
+                        child: Text(p.name, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w500)),
                       ),
                     )).toList(),
                     onChanged: (v) => setState(() => _selectedCompanyId = v),
