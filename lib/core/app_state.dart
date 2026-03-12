@@ -77,24 +77,38 @@ class AppState extends ChangeNotifier {
   }
 
   // ─── Company-scoped getters ───────────────────────────────────────────────
+  // NOTE: For project admins created by master admin, their companyId == projectId.
+  // Projects created by master admin may have companyId='rla_platform' until an admin
+  // is assigned. We match on BOTH p.companyId == currentCompanyId AND p.id == currentCompanyId.
   List<RealEstateProject> get companyProjects {
     if (isMasterAdmin) return _projects;
-    return _projects.where((p) => p.companyId == currentCompanyId).toList();
+    final cid = currentCompanyId;
+    if (cid == null) return [];
+    return _projects.where((p) => p.companyId == cid || p.id == cid).toList();
   }
 
   List<AppUser> get companyUsers {
     if (isMasterAdmin) return _users;
-    return _users.where((u) => u.companyId == currentCompanyId).toList();
+    final cid = currentCompanyId;
+    if (cid == null) return [];
+    // Include users whose companyId matches, plus self
+    return _users.where((u) => u.companyId == cid).toList();
   }
 
   List<Lead> get companyLeads {
     if (isMasterAdmin) return _leads;
-    return _leads.where((l) => l.companyId == currentCompanyId).toList();
+    final cid = currentCompanyId;
+    if (cid == null) return [];
+    // Match leads by companyId OR by projectId (for leads assigned to projects the admin owns)
+    final myProjectIds = companyProjects.map((p) => p.id).toSet();
+    return _leads.where((l) => l.companyId == cid || myProjectIds.contains(l.projectId)).toList();
   }
 
   List<CrmNotification> get companyNotifications {
     if (isMasterAdmin) return _notifications;
-    return _notifications.where((n) => n.companyId == currentCompanyId).toList();
+    final cid = currentCompanyId;
+    if (cid == null) return [];
+    return _notifications.where((n) => n.companyId == cid || n.isForAll).toList();
   }
 
   // ─── Role-based project/lead getters ─────────────────────────────────────
@@ -457,18 +471,26 @@ RLA CRM Platform
   }
 
   // ─── Authentication ───────────────────────────────────────────────────────
-  bool login(String emailOrUsername, String password) {
+  /// Returns null on success, or an error message string on failure.
+  String? loginWithError(String emailOrUsername, String password) {
+    AppUser? user;
     try {
-      final user = _users.firstWhere(
-          (u) => (u.email.toLowerCase() == emailOrUsername.toLowerCase()) && u.password == password);
-      if (!user.isActive) return false;
-      if (!user.isApproved) return false;
-      _currentUser = user;
-      notifyListeners();
-      return true;
+      user = _users.firstWhere(
+          (u) => u.email.toLowerCase() == emailOrUsername.toLowerCase());
     } catch (_) {
-      return false;
+      return 'No account found with this email address';
     }
+    if (user.password != password) return 'Incorrect password. Please try again';
+    if (!user.isApproved) return 'Your account is pending approval. Please contact the admin';
+    if (!user.isActive) return 'Your account has been deactivated. Please contact the admin';
+    _currentUser = user;
+    notifyListeners();
+    return null;
+  }
+
+  // Legacy bool login kept for compatibility
+  bool login(String emailOrUsername, String password) {
+    return loginWithError(emailOrUsername, password) == null;
   }
 
   void logout() {
@@ -892,16 +914,36 @@ RLA CRM Platform
       email: email,
       password: password,
       role: UserRole.companyAdmin,
-      companyId: resolvedProjectId,   // stored as companyId for backwards compat
+      companyId: resolvedProjectId,   // user.companyId == project.id — this is the key link
       companyName: project.name,
       isApproved: true,
       hasLoggedInBefore: false,
     );
     _saveUser(user);
-    // Also update the project's companyId to this project's own ID so lookups work
-    if (project.companyId == 'rla_platform') {
-      project.updatedAt = DateTime.now();
-      _saveProject(project);
+    // CRITICAL: Update the project's companyId to match resolvedProjectId (= project.id)
+    // This ensures companyProjects getter finds this project when admin logs in.
+    // Since companyId is final, we rebuild the project with updated companyId.
+    if (project.companyId != resolvedProjectId) {
+      final updatedProject = RealEstateProject(
+        id: project.id,
+        name: project.name,
+        location: project.location,
+        description: project.description,
+        developerName: project.developerName,
+        propertyType: project.propertyType,
+        priceFrom: project.priceFrom,
+        priceTo: project.priceTo,
+        status: project.status,
+        assignedSalesIds: project.assignedSalesIds,
+        createdById: project.createdById,
+        createdByName: project.createdByName,
+        createdAt: project.createdAt,
+        updatedAt: DateTime.now(),
+        totalUnits: project.totalUnits,
+        reraNumber: project.reraNumber,
+        companyId: resolvedProjectId,  // NOW matches user.companyId
+      );
+      _saveProject(updatedProject);
     }
     _loadAll();
     notifyListeners();

@@ -1882,11 +1882,12 @@ class _MasterProjectsScreen extends StatefulWidget {
 class _MasterProjectsScreenState extends State<_MasterProjectsScreen> {
   String _search = '';
 
-  // Helper: get the project admin name for a given companyId (or project ID)
+  // Helper: get the project admin name for a given project
   String _projectAdminName(AppState state, String projectId) {
     try {
+      // Match admin whose companyId == projectId (set by addProjectAdmin)
       final admin = state.users.firstWhere(
-        (u) => u.companyId == projectId && u.role == UserRole.companyAdmin && u.isApproved,
+        (u) => (u.companyId == projectId) && u.role == UserRole.companyAdmin && u.isApproved,
       );
       return admin.name;
     } catch (_) {
@@ -1910,9 +1911,9 @@ class _MasterProjectsScreenState extends State<_MasterProjectsScreen> {
       backgroundColor: Colors.transparent,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) {
-          // Sales team: when editing, show members linked to this project; when creating, empty
+          // Sales team: when editing, show members linked to this project by project ID
           final salesForSheet = existing != null
-              ? state.users.where((u) => u.companyId == existing.companyId && u.role == UserRole.sales && u.isApproved).toList()
+              ? state.users.where((u) => (u.companyId == existing.id || u.companyId == existing.companyId) && u.role == UserRole.sales && u.isApproved).toList()
               : <AppUser>[];
           return Padding(
             padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
@@ -2111,7 +2112,7 @@ class _MasterProjectsScreenState extends State<_MasterProjectsScreen> {
                     itemBuilder: (ctx, i) {
                       final p = projects[i];
                       // Find admin for this project
-                      final adminName = _projectAdminName(state, p.companyId);
+                      final adminName = _projectAdminName(state, p.id);
                       final leads = state.leads.where((l) => l.projectId == p.id).toList();
                       return Container(
                         margin: const EdgeInsets.only(bottom: 12),

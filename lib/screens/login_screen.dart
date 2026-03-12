@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../core/app_state.dart';
-import '../core/models.dart';
 import '../core/theme.dart';
 import '../widgets/common_widgets.dart';
 
@@ -50,12 +49,16 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
   }
 
   void _login() async {
+    if (_emailCtrl.text.trim().isEmpty || _passCtrl.text.trim().isEmpty) {
+      setState(() { _loading = false; _error = 'Please enter your email and password.'; });
+      return;
+    }
     setState(() { _loading = true; _error = null; });
     await Future.delayed(const Duration(milliseconds: 400));
     if (!mounted) return;
     final state = context.read<AppState>();
-    final ok = state.login(_emailCtrl.text.trim(), _passCtrl.text.trim());
-    if (ok) {
+    final err = state.loginWithError(_emailCtrl.text.trim(), _passCtrl.text.trim());
+    if (err == null) {
       if (_rememberMe) {
         state.saveRememberMe(_emailCtrl.text.trim(), _passCtrl.text.trim());
       } else {
@@ -64,7 +67,7 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
     }
     setState(() {
       _loading = false;
-      if (!ok) _error = 'Invalid credentials. Please check your email and password.';
+      if (err != null) _error = err;
     });
   }
 
