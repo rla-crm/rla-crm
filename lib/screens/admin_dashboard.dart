@@ -403,8 +403,14 @@ class _AdminHome extends StatelessWidget {
                     children: [
                       Text(_greeting(), style: GoogleFonts.inter(fontSize: 13, color: AppColors.textMuted)),
                       Text(state.currentUser?.name ?? 'Admin', style: GoogleFonts.inter(fontSize: 22, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
-                      if (state.currentCompany != null)
-                        Text(state.currentCompany!.name, style: GoogleFonts.inter(fontSize: 12, color: AppColors.lavender, fontWeight: FontWeight.w500)),
+                      // Show project/company name under greeting
+                      Builder(builder: (ctx) {
+                        // For project admins, companyName holds the project name
+                        final label = state.currentUser?.companyName
+                            ?? state.currentCompany?.name;
+                        if (label == null || label.isEmpty) return const SizedBox.shrink();
+                        return Text(label, style: GoogleFonts.inter(fontSize: 12, color: AppColors.lavender, fontWeight: FontWeight.w500));
+                      }),
                     ],
                   ),
                 ),

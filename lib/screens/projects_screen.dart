@@ -126,8 +126,6 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     PropertyType propType = existing?.propertyType ?? PropertyType.apartment;
     ProjectStatus projStatus = existing?.status ?? ProjectStatus.active;
     List<String> assignedIds = List.from(existing?.assignedSalesIds ?? []);
-    // For master admin: track which company this project belongs to
-    String? selectedCompanyId = existing?.companyId.isNotEmpty == true ? existing!.companyId : null;
 
     showModalBottomSheet(
       context: context,
@@ -135,15 +133,18 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       backgroundColor: Colors.transparent,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) {
-          // Determine sales users based on selected company (master admin) or current company
-          final List<dynamic> salesForSheet = state.isMasterAdmin && selectedCompanyId != null
-              ? state.users.where((u) =>
-                  u.companyId == selectedCompanyId &&
-                  u.role == UserRole.sales &&
-                  u.isApproved).toList()
-              : state.isMasterAdmin
-                  ? []
-                  : state.salesUsers;
+          // Sales users for this project:
+          // - Project admin: use companyUsers who are sales & approved
+          // - Master admin editing existing project: users whose companyId == project.id
+          // - Master admin creating new project: no sales to assign yet (done after admin is assigned)
+          final List<AppUser> salesForSheet = state.isMasterAdmin
+              ? (existing != null
+                  ? state.users.where((u) =>
+                      (u.companyId == existing.id || u.companyId == existing.companyId) &&
+                      u.role == UserRole.sales &&
+                      u.isApproved).toList()
+                  : [])
+              : state.salesUsers;
 
           return Padding(
             padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
@@ -169,49 +170,6 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // ── Company selector (Master Admin only) ─────────────
-                          if (state.isMasterAdmin) ...[
-                            Text('Assign to Company *', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
-                            const SizedBox(height: 8),
-                            Container(
-                              decoration: BoxDecoration(
-                                color: AppColors.background,
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(color: selectedCompanyId == null ? AppColors.border : AppColors.lavender, width: selectedCompanyId == null ? 1 : 1.5),
-                              ),
-                              child: DropdownButtonHideUnderline(
-                                child: DropdownButton<String>(
-                                  value: selectedCompanyId,
-                                  hint: Padding(
-                                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                                    child: Text('-- Select company --', style: GoogleFonts.inter(fontSize: 13, color: AppColors.textMuted)),
-                                  ),
-                                  isExpanded: true,
-                                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                                  borderRadius: BorderRadius.circular(14),
-                                  items: state.companies.where((c) => c.isApproved && c.isActive).map((c) =>
-                                    DropdownMenuItem(
-                                      value: c.id,
-                                      child: Padding(
-                                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                                        child: Row(children: [
-                                          Container(width: 28, height: 28, decoration: BoxDecoration(gradient: AppColors.gradientPrimary, borderRadius: BorderRadius.circular(7)),
-                                            child: Center(child: Text(c.initials, style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white)))),
-                                          const SizedBox(width: 10),
-                                          Text(c.name, style: GoogleFonts.inter(fontSize: 13, color: AppColors.textPrimary)),
-                                        ]),
-                                      ),
-                                    ),
-                                  ).toList(),
-                                  onChanged: (v) => setS(() {
-                                    selectedCompanyId = v;
-                                    assignedIds.clear(); // reset sales selection on company change
-                                  }),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 14),
-                          ],
                           _sheetField(nameCtrl, 'Project Name *', Icons.apartment_outlined),
                           const SizedBox(height: 12),
                           _sheetField(locCtrl, 'Location *', Icons.location_on_outlined),
@@ -267,11 +225,22 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                           ],
                           Text('Assign Sales Team', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
                           const SizedBox(height: 8),
-                          if (state.isMasterAdmin && selectedCompanyId == null)
+                          if (state.isMasterAdmin && existing == null)
                             Container(
                               padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(color: AppColors.peach.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.peach.withValues(alpha: 0.3))),
-                              child: Text('Select a company above to assign sales team members.', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textSecondary)),
+                              decoration: BoxDecoration(
+                                color: AppColors.sky.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: AppColors.sky.withValues(alpha: 0.3)),
+                              ),
+                              child: Row(children: [
+                                const Icon(Icons.info_outline_rounded, size: 15, color: AppColors.sky),
+                                const SizedBox(width: 8),
+                                Expanded(child: Text(
+                                  'Sales team can be assigned after creating the project and assigning a Project Admin.',
+                                  style: GoogleFonts.inter(fontSize: 12, color: AppColors.textSecondary),
+                                )),
+                              ]),
                             )
                           else if (salesForSheet.isEmpty)
                             Container(
@@ -306,11 +275,15 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                             icon: existing == null ? Icons.add_rounded : Icons.check_rounded,
                             onTap: () {
                               if (nameCtrl.text.trim().isEmpty || locCtrl.text.trim().isEmpty) return;
-                              // Master admin must select a company
+                              // companyId logic:
+                              // - Master admin creating new: use 'rla_platform' placeholder.
+                              //   When addProjectAdmin is called later, the project's companyId
+                              //   gets updated to project.id, making it visible to that admin.
+                              // - Master admin editing existing: preserve existing companyId.
+                              // - Project admin: use their own currentCompanyId (== their projectId).
                               final companyId = state.isMasterAdmin
-                                  ? (selectedCompanyId ?? '')
-                                  : (state.currentCompanyId ?? '');
-                              if (state.isMasterAdmin && companyId.isEmpty) return;
+                                  ? (existing?.companyId ?? 'rla_platform')
+                                  : (state.currentCompanyId ?? 'rla_platform');
                               if (existing == null) {
                                 state.addProject(RealEstateProject(
                                   name: nameCtrl.text.trim(), location: locCtrl.text.trim(),

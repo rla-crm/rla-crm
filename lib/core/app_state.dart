@@ -601,12 +601,13 @@ RLA CRM Platform
     return null;
   }
 
-  /// Employee signup → goes to Company Admin for approval
+  /// Employee (Sales Team) signup → goes to Project Admin for approval.
+  /// [companyId] is the projectId (projects are now the top-level entity).
   SignupResult submitEmployeeSignup({
     required String name,
     required String email,
     required String password,
-    required String companyId,
+    required String companyId,   // actually a projectId in the new flow
   }) {
     if (_users.any((u) => u.email.toLowerCase() == email.toLowerCase())) {
       return const SignupResult(error: 'Email already registered');
@@ -617,32 +618,45 @@ RLA CRM Platform
       return const SignupResult(error: 'A signup request with this email is already pending');
     }
 
-    Company company;
+    // In the project-centric flow, companyId == projectId.
+    // Resolve the project name from the projects list; fall back gracefully.
+    String projectName = 'Unknown Project';
     try {
-      company = _companies.firstWhere((c) => c.id == companyId && c.isApproved);
+      final proj = _projects.firstWhere((p) => p.id == companyId);
+      projectName = proj.name;
     } catch (_) {
-      return const SignupResult(error: 'Company not found or not yet approved');
+      // Also try to find by companyId field for legacy data
+      try {
+        final proj = _projects.firstWhere((p) => p.companyId == companyId);
+        projectName = proj.name;
+      } catch (_) {
+        // If neither matches, check companies as a final fallback
+        try {
+          final comp = _companies.firstWhere((c) => c.id == companyId && c.isApproved);
+          projectName = comp.name;
+        } catch (_) {
+          // Project/company ID not found — still allow signup (admin will review)
+        }
+      }
     }
-
-    final isAdminEmail = company.adminEmail.toLowerCase() == email.toLowerCase();
 
     final req = ApprovalRequest(
       type: ApprovalType.employeeSignup,
       applicantName: name,
       applicantEmail: email,
-      companyId: companyId,
-      companyName: company.name,
+      companyId: companyId,   // stores projectId so admin's companyPendingApprovals filter works
+      companyName: projectName,
       password: password,
-      role: isAdminEmail ? 'admin' : 'sales',
+      role: 'sales',           // self-signup is always for sales role
     );
     _saveApproval(req);
     _loadAll();
     notifyListeners();
 
-    // Notify company admins
-    final companyAdmins = _users.where((u) =>
+    // Notify project admins (users whose companyId == the projectId)
+    final projectAdmins = _users.where((u) =>
         u.companyId == companyId && u.role == UserRole.companyAdmin && u.isApproved);
-    for (final ca in companyAdmins) {
+    for (final ca in projectAdmins) {
       _sendEmail(
         toEmail: ca.email,
         toName: ca.name,
@@ -650,11 +664,11 @@ RLA CRM Platform
         body: '''
 Hello ${ca.name},
 
-A new sales team member has requested to join ${company.name} on RLA CRM.
+A new sales team member has requested to join $projectName on RLA CRM.
 
 Name: $name
 Email: $email
-Requested Role: ${isAdminEmail ? 'Project Admin' : 'Sales Team'}
+Requested Role: Sales Team
 
 Please log in to RLA CRM → Team → Pending Approvals to review this request.
 
@@ -669,11 +683,11 @@ RLA CRM Platform
     _sendEmail(
       toEmail: email,
       toName: name,
-      subject: '✅ Signup Request Received – ${company.name}',
+      subject: '✅ Signup Request Received – $projectName',
       body: '''
 Hello $name,
 
-Your request to join ${company.name} on RLA CRM has been received and is awaiting approval from the project admin.
+Your request to join $projectName on RLA CRM has been received and is awaiting approval from the project admin.
 
 You will be notified by email once your account is approved.
 
@@ -778,7 +792,7 @@ RLA CRM Platform
     } catch (_) {}
   }
 
-  /// Approve an employee signup (Company Admin only)
+  /// Approve an employee signup (Project Admin only)
   void approveEmployeeSignup(String approvalId, {String? note}) {
     try {
       final req = _approvals.firstWhere((a) => a.id == approvalId);
@@ -787,9 +801,17 @@ RLA CRM Platform
       req.reviewNote = note;
       req.updatedAt = DateTime.now();
 
-      // Find company
-      Company? company;
-      try { company = _companies.firstWhere((c) => c.id == req.companyId); } catch (_) {}
+      // Resolve display name: prefer project name, fall back to stored companyName
+      String entityName = req.companyName ?? 'the project';
+      try {
+        final proj = _projects.firstWhere((p) => p.id == req.companyId);
+        entityName = proj.name;
+      } catch (_) {
+        try {
+          final comp = _companies.firstWhere((c) => c.id == req.companyId);
+          entityName = comp.name;
+        } catch (_) {}
+      }
 
       final role = req.role == 'admin' ? UserRole.companyAdmin : UserRole.sales;
       final user = AppUser(
@@ -797,8 +819,8 @@ RLA CRM Platform
         email: req.applicantEmail,
         password: req.password ?? 'changeme123',
         role: role,
-        companyId: req.companyId,
-        companyName: company?.name ?? req.companyName,
+        companyId: req.companyId,    // companyId == projectId for project-scoped users
+        companyName: entityName,
         isApproved: true,
         hasLoggedInBefore: false,
       );
@@ -810,7 +832,7 @@ RLA CRM Platform
       _sendEmail(
         toEmail: req.applicantEmail,
         toName: req.applicantName,
-        subject: '🎉 Welcome to ${company?.name ?? req.companyName} – RLA CRM',
+        subject: '🎉 Welcome to $entityName – RLA CRM',
         body: '''
 Hello ${req.applicantName},
 
@@ -819,7 +841,7 @@ Your account has been approved! You can now log in to RLA CRM.
 Email: ${req.applicantEmail}
 Password: ${req.password ?? 'changeme123'}
 Role: ${role == UserRole.companyAdmin ? 'Project Admin' : 'Sales Team'}
-Company: ${company?.name ?? req.companyName}
+Project: $entityName
 
 Best regards,
 RLA CRM Platform

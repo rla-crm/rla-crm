@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../core/app_state.dart';
+import '../core/models.dart';
 import '../core/theme.dart';
 import '../widgets/common_widgets.dart';
 
@@ -645,7 +646,11 @@ class _SalesTeamSignupSheetState extends State<_SalesTeamSignupSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final companies = context.read<AppState>().companies.where((c) => c.isActive && c.isApproved).toList();
+    // Use projects list — in the project-centric flow, sales reps join a project directly.
+    // Only show projects that have an assigned admin (companyId != 'rla_platform') or all projects.
+    final projects = context.watch<AppState>().projects
+        .where((p) => p.status == ProjectStatus.active)
+        .toList();
     return Container(
       margin: const EdgeInsets.all(16),
       decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(24)),
@@ -694,11 +699,11 @@ class _SalesTeamSignupSheetState extends State<_SalesTeamSignupSheet> {
             const SizedBox(height: 16),
             Text('Select Your Project *', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
             const SizedBox(height: 8),
-            if (companies.isEmpty)
+            if (projects.isEmpty)
               Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(color: AppColors.peach.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.peach.withValues(alpha: 0.3))),
-                child: Text('No approved projects available. Your project may be pending approval.',
+                child: Text('No active projects available. Please contact the master admin.',
                     style: GoogleFonts.inter(fontSize: 12, color: AppColors.textSecondary)),
               )
             else
@@ -719,23 +724,24 @@ class _SalesTeamSignupSheetState extends State<_SalesTeamSignupSheet> {
                     isExpanded: true,
                     padding: const EdgeInsets.symmetric(horizontal: 8),
                     borderRadius: BorderRadius.circular(14),
-                    items: companies.map((c) => DropdownMenuItem(
-                      value: c.id,
+                    items: projects.map((p) => DropdownMenuItem(
+                      value: p.id,
                       child: Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 8),
                         child: Row(
                           children: [
                             Container(width: 30, height: 30,
                               decoration: BoxDecoration(gradient: AppColors.gradientPrimary, borderRadius: BorderRadius.circular(8)),
-                              child: Center(child: Text(c.initials, style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white))),
+                              child: Center(child: Text(p.name.isNotEmpty ? p.name[0].toUpperCase() : 'P',
+                                  style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white))),
                             ),
                             const SizedBox(width: 10),
                             Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Text(c.name,       style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w500, color: AppColors.textPrimary)),
-                                Text(c.adminName, style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
+                                Text(p.name, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w500, color: AppColors.textPrimary), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                Text(p.location, style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted), maxLines: 1, overflow: TextOverflow.ellipsis),
                               ],
                             ),
                           ],

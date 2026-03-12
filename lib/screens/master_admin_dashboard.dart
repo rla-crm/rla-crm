@@ -1741,7 +1741,7 @@ class _AddProjectAdminSheetState extends State<_AddProjectAdminSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final projects = context.read<AppState>().projects.toList();
+    final projects = context.watch<AppState>().projects.toList();
     return Container(
       margin: const EdgeInsets.all(16),
       decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(24)),
