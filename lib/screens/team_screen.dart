@@ -88,6 +88,7 @@ class _AdminTeamViewState extends State<_AdminTeamView> {
                     leadCount: uLeadCount,
                     closedCount: uClosedCount,
                     isSelf: state.currentUser?.id == u.id,
+                    canEdit: u.role != UserRole.masterAdmin, // project admin cannot edit master admins
                     onEdit: () => _showUserSheet(context, state, u),
                     onToggle: () => state.toggleUserActive(u.id),
                     onDelete: () => _confirmDelete(context, state, u),
@@ -156,11 +157,12 @@ class _UserCard extends StatelessWidget {
   final int leadCount;
   final int closedCount;
   final bool isSelf;
+  final bool canEdit;
   final VoidCallback onEdit;
   final VoidCallback onToggle;
   final VoidCallback onDelete;
 
-  const _UserCard({required this.user, required this.leadCount, required this.closedCount, required this.isSelf, required this.onEdit, required this.onToggle, required this.onDelete});
+  const _UserCard({required this.user, required this.leadCount, required this.closedCount, required this.isSelf, this.canEdit = true, required this.onEdit, required this.onToggle, required this.onDelete});
 
   @override
   Widget build(BuildContext context) {
@@ -222,12 +224,19 @@ class _UserCard extends StatelessWidget {
                   const SizedBox(width: 12),
                   _stat(Icons.check_circle_outline_rounded, '$closedCount closed'),
                   const Spacer(),
-                  _actionBtn(Icons.edit_outlined, AppColors.lavender, onEdit),
-                  const SizedBox(width: 6),
-                  _actionBtn(user.isActive ? Icons.pause_circle_outline_rounded : Icons.play_circle_outline_rounded,
-                      user.isActive ? AppColors.peach : AppColors.mint, onToggle),
-                  const SizedBox(width: 6),
-                  _actionBtn(Icons.delete_outline_rounded, AppColors.pink, onDelete),
+                  if (canEdit) ...[
+                    _actionBtn(Icons.edit_outlined, AppColors.lavender, onEdit),
+                    const SizedBox(width: 6),
+                    _actionBtn(user.isActive ? Icons.pause_circle_outline_rounded : Icons.play_circle_outline_rounded,
+                        user.isActive ? AppColors.peach : AppColors.mint, onToggle),
+                    const SizedBox(width: 6),
+                    _actionBtn(Icons.delete_outline_rounded, AppColors.pink, onDelete),
+                  ] else
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(color: AppColors.peach.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
+                      child: Text('Master Admin', style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w600, color: AppColors.peach)),
+                    ),
                 ],
               ),
             ],

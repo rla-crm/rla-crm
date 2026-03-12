@@ -1038,6 +1038,18 @@ class _AdminReportsScreenState extends State<_AdminReportsScreen> {
   String? _selectedProjectId;
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Auto-select if there's only one project
+    if (_selectedProjectId == null) {
+      final projects = context.read<AppState>().companyProjects;
+      if (projects.length == 1) {
+        _selectedProjectId = projects.first.id;
+      }
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     final projects = state.companyProjects;
@@ -1063,6 +1075,21 @@ class _AdminReportsScreenState extends State<_AdminReportsScreen> {
                     _showReportSheet(context, state, project);
                   },
                   gradient: AppColors.gradientCTA,
+                )
+              else
+                Container(
+                  height: 36,
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.picture_as_pdf_rounded, size: 14, color: AppColors.textMuted.withValues(alpha: 0.5)),
+                    const SizedBox(width: 6),
+                    Text('Generate', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textMuted.withValues(alpha: 0.5))),
+                  ]),
                 ),
             ]),
           ),

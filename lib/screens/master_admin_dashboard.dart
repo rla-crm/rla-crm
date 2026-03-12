@@ -691,39 +691,6 @@ class _MasterOverview extends StatelessWidget {
     );
   }
 
-  Widget _companyRow(BuildContext context, Company c) {
-    return GestureDetector(
-      onTap: () => _showCompanyDetails(context, c),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.border)),
-        child: Row(
-          children: [
-            AvatarWidget(initials: c.initials, size: 40, gradient: AppColors.gradientSecondary),
-            const SizedBox(width: 12),
-            Expanded(child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(c.name, style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-                Text(c.adminEmail, style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted)),
-              ],
-            )),
-            StatusPill(label: c.isActive ? 'Active' : 'Inactive', color: c.isActive ? AppColors.mint : AppColors.stageLost, isSmall: true),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _showCompanyDetails(BuildContext context, Company c) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => _CompanyDetailSheet(company: c),
-    );
-  }
 }
 
 // ─── Approvals Screen ─────────────────────────────────────────────────────────
@@ -1223,447 +1190,6 @@ class _MasterAnalyticsScreen extends StatelessWidget {
   Widget _divider() => Container(width: 1, height: 28, color: AppColors.border);
 }
 
-// ─── Companies Screen ─────────────────────────────────────────────────────────
-class _CompaniesScreen extends StatefulWidget {
-  const _CompaniesScreen();
-
-  @override
-  State<_CompaniesScreen> createState() => _CompaniesScreenState();
-}
-
-class _CompaniesScreenState extends State<_CompaniesScreen> {
-  String _search = '';
-
-  @override
-  Widget build(BuildContext context) {
-    final state = context.watch<AppState>();
-    final filtered = state.companies.where((c) =>
-        c.name.toLowerCase().contains(_search.toLowerCase()) ||
-        c.adminEmail.toLowerCase().contains(_search.toLowerCase())).toList();
-
-    return SafeArea(
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-            child: Row(
-              children: [
-                Expanded(child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Companies', style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                    Text('${state.totalCompanies} registered', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted)),
-                  ],
-                )),
-                GradientButton(
-                  label: 'Add Project',
-                  icon: Icons.add_rounded,
-                  height: 40,
-                  onTap: () => _showAddCompany(context),
-                  gradient: AppColors.gradientSecondary,
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 14),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: TextField(
-              decoration: const InputDecoration(hintText: 'Search companies...', prefixIcon: Icon(Icons.search_rounded, size: 18, color: AppColors.textMuted)),
-              onChanged: (v) => setState(() => _search = v),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Expanded(
-            child: filtered.isEmpty
-                ? Center(child: Text('No companies found', style: GoogleFonts.inter(color: AppColors.textMuted)))
-                : ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-                    itemCount: filtered.length,
-                    itemBuilder: (_, i) => _CompanyCard(company: filtered[i]),
-                  ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showAddCompany(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => const _AddCompanySheet(),
-    );
-  }
-}
-
-class _CompanyCard extends StatelessWidget {
-  final Company company;
-  const _CompanyCard({required this.company});
-
-  @override
-  Widget build(BuildContext context) {
-    final state = context.read<AppState>();
-    final companyUsers = state.users.where((u) => u.companyId == company.id).length;
-    final companyLeads = state.leads.where((l) => l.companyId == company.id).length;
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: company.isActive ? AppColors.border : AppColors.stageLost.withValues(alpha: 0.3)),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8)],
-      ),
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                AvatarWidget(
-                  initials: company.initials,
-                  size: 44,
-                  gradient: company.isActive ? AppColors.gradientSecondary : const LinearGradient(colors: [AppColors.stageLost, AppColors.border]),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(children: [
-                        Expanded(child: Text(company.name, style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary))),
-                        StatusPill(label: company.isActive ? 'Active' : 'Inactive', color: company.isActive ? AppColors.mint : AppColors.stageLost, isSmall: true),
-                      ]),
-                      const SizedBox(height: 2),
-                      Text(company.adminEmail, style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted)),
-                      const SizedBox(height: 4),
-                      Row(children: [
-                        StatusPill(label: company.isActive ? 'Active' : 'Inactive', color: company.isActive ? AppColors.mint : AppColors.stageLost, isSmall: true),
-                        if (!company.isApproved) ...[
-                          const SizedBox(width: 6),
-                          StatusPill(label: 'Pending', color: AppColors.peach, isSmall: true),
-                        ],
-                      ]),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            decoration: BoxDecoration(
-              color: AppColors.background,
-              borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(16), bottomRight: Radius.circular(16)),
-            ),
-            child: Row(
-              children: [
-                _stat(Icons.people_outline, '$companyUsers users'),
-                const SizedBox(width: 16),
-                _stat(Icons.trending_up_rounded, '$companyLeads leads'),
-                const Spacer(),
-                
-                const SizedBox(width: 6),
-                _actionBtn(
-                  company.isActive ? Icons.pause_circle_outline_rounded : Icons.play_circle_outline_rounded,
-                  company.isActive ? AppColors.pink : AppColors.mint,
-                  () => state.toggleCompanyActive(company.id),
-                ),
-                const SizedBox(width: 6),
-                _actionBtn(Icons.delete_outline_rounded, AppColors.stageLost, () => _confirmDelete(context)),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _stat(IconData icon, String text) => Row(mainAxisSize: MainAxisSize.min, children: [Icon(icon, size: 13, color: AppColors.textMuted), const SizedBox(width: 4), Text(text, style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted))]);
-
-  Widget _actionBtn(IconData icon, Color color, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(width: 30, height: 30, decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(8)), child: Icon(icon, size: 15, color: color)),
-    );
-  }
-
-  void _confirmDelete(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Delete Company', style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
-        content: Text('Delete "${company.name}"? This will also remove all associated users.', style: GoogleFonts.inter()),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Cancel', style: GoogleFonts.inter())),
-          TextButton(onPressed: () { Navigator.pop(ctx); context.read<AppState>().deleteCompany(company.id); }, child: Text('Delete', style: GoogleFonts.inter(color: Colors.red))),
-        ],
-      ),
-    );
-  }
-}
-
-// ─── Company Detail Sheet ─────────────────────────────────────────────────────
-class _CompanyDetailSheet extends StatelessWidget {
-  final Company company;
-  const _CompanyDetailSheet({required this.company});
-
-  @override
-  Widget build(BuildContext context) {
-    final state = context.read<AppState>();
-    final users = state.users.where((u) => u.companyId == company.id).toList();
-    final leads = state.leads.where((l) => l.companyId == company.id).toList();
-
-    return Container(
-      margin: const EdgeInsets.all(16),
-      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.82),
-      decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(24)),
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                AvatarWidget(initials: company.initials, size: 52, gradient: AppColors.gradientSecondary),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(company.name, style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                      Text(company.adminEmail, style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted)),
-                    ],
-                  ),
-                ),
-                IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close_rounded)),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Row(children: [
-              StatusPill(label: company.isActive ? 'Active' : 'Inactive', color: company.isActive ? AppColors.mint : AppColors.stageLost),
-            ]),
-            const SizedBox(height: 16),
-            // Detailed info grid
-            LayoutBuilder(builder: (_, constraints) {
-              final cols = constraints.maxWidth > 400 ? 3 : 2;
-              return GridView.count(
-                crossAxisCount: cols,
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                crossAxisSpacing: 8,
-                mainAxisSpacing: 8,
-                childAspectRatio: 2.2,
-                children: [
-                  _infoBadge('Users', users.length.toString()),
-                  _infoBadge('Leads', leads.length.toString()),
-                  _infoBadge('Admin', company.adminName),
-                  _infoBadge('First Reg.', _fmtDate(company.createdAt)),
-                  _infoBadge('Days Active', '${company.daysElapsed}'),
-                ],
-              );
-            }),
-            if (company.phone != null) ...[
-              const SizedBox(height: 8),
-              Row(children: [
-                const Icon(Icons.phone_outlined, size: 13, color: AppColors.textMuted),
-                const SizedBox(width: 6),
-                Text(company.phone!, style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted)),
-              ]),
-            ],
-            const SizedBox(height: 16),
-            Text('Team Members (${users.length})', style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-            const SizedBox(height: 8),
-            ...users.map((u) => Container(
-              margin: const EdgeInsets.only(bottom: 6),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.border)),
-              child: Row(
-                children: [
-                  AvatarWidget(initials: u.initials, size: 32),
-                  const SizedBox(width: 10),
-                  Expanded(child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(u.name, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w500)),
-                      Text(u.email, style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
-                    ],
-                  )),
-                  StatusPill(label: u.roleLabel, color: u.role == UserRole.companyAdmin ? AppColors.lavender : AppColors.sky, isSmall: true),
-                ],
-              ),
-            )),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _infoBadge(String label, String value) {
-    return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.border)),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(value, style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary), maxLines: 1, overflow: TextOverflow.ellipsis),
-          Text(label, style: GoogleFonts.inter(fontSize: 9, color: AppColors.textMuted)),
-        ],
-      ),
-    );
-  }
-
-  String _fmtDate(DateTime dt) => '${dt.day}/${dt.month}/${dt.year}';
-}
-
-// ─── Add Company Sheet ────────────────────────────────────────────────────────
-class _AddCompanySheet extends StatefulWidget {
-  const _AddCompanySheet();
-
-  @override
-  State<_AddCompanySheet> createState() => _AddCompanySheetState();
-}
-
-class _AddCompanySheetState extends State<_AddCompanySheet> {
-  final _nameCtrl = TextEditingController();
-  final _adminNameCtrl = TextEditingController();
-  final _emailCtrl = TextEditingController();
-  final _phoneCtrl = TextEditingController();
-  final _passCtrl = TextEditingController();
-  bool _loading = false;
-  bool _obscure = true;
-  String? _error;
-
-  @override
-  void dispose() {
-    _nameCtrl.dispose(); _adminNameCtrl.dispose(); _emailCtrl.dispose();
-    _phoneCtrl.dispose(); _passCtrl.dispose();
-    super.dispose();
-  }
-
-  void _save() {
-    if (_nameCtrl.text.isEmpty || _adminNameCtrl.text.isEmpty || _emailCtrl.text.isEmpty) {
-      setState(() => _error = 'Project name, admin name, and email are required');
-      return;
-    }
-    if (_passCtrl.text.trim().length < 6) {
-      setState(() => _error = 'Password must be at least 6 characters');
-      return;
-    }
-    final state = context.read<AppState>();
-    // Check email uniqueness
-    if (state.users.any((u) => u.email.toLowerCase() == _emailCtrl.text.trim().toLowerCase())) {
-      setState(() => _error = 'This email is already registered');
-      return;
-    }
-    setState(() { _loading = true; _error = null; });
-    // Directly create company (master admin bypass)
-    final company = Company(
-      name: _nameCtrl.text.trim(),
-      adminEmail: _emailCtrl.text.trim(),
-      adminName: _adminNameCtrl.text.trim(),
-      phone: _phoneCtrl.text.trim().isEmpty ? null : _phoneCtrl.text.trim(),
-      isApproved: true,
-    );
-    state.addCompany(company);
-    // Also create the Project Admin user automatically
-    state.addUser(AppUser(
-      name: _adminNameCtrl.text.trim(),
-      email: _emailCtrl.text.trim(),
-      password: _passCtrl.text.trim(),
-      role: UserRole.companyAdmin,
-      companyId: company.id,
-      companyName: company.name,
-      isApproved: true,
-      hasLoggedInBefore: false,
-    ));
-    if (mounted) {
-      Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Project "${company.name}" created. Admin "${_adminNameCtrl.text.trim()}" can now log in.', style: GoogleFonts.inter(fontSize: 12)),
-        backgroundColor: const Color(0xFF3B7A8A),
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        duration: const Duration(seconds: 5),
-      ));
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(24)),
-      child: SingleChildScrollView(
-        padding: EdgeInsets.fromLTRB(24, 24, 24, MediaQuery.of(context).viewInsets.bottom + 24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(children: [
-              Container(width: 36, height: 36,
-                decoration: BoxDecoration(gradient: AppColors.gradientSecondary, borderRadius: BorderRadius.circular(10)),
-                child: const Icon(Icons.add_business_outlined, size: 18, color: Colors.white)),
-              const SizedBox(width: 12),
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Add New Project', style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                Text('Creates project + Project Admin account', style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted)),
-              ])),
-              IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close_rounded, color: AppColors.textMuted)),
-            ]),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: AppColors.sky.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.sky.withValues(alpha: 0.4))),
-              child: Row(children: [
-                const Icon(Icons.info_outline_rounded, size: 15, color: Color(0xFF2090A0)),
-                const SizedBox(width: 8),
-                Expanded(child: Text('A Project Admin account will be created automatically with the credentials below.', style: GoogleFonts.inter(fontSize: 11, color: const Color(0xFF2090A0)))),
-              ]),
-            ),
-            const SizedBox(height: 14),
-            _field(_nameCtrl, 'Project / Company Name *', Icons.business_outlined),
-            const SizedBox(height: 10),
-            _field(_adminNameCtrl, 'Project Admin Name *', Icons.person_outline_rounded),
-            const SizedBox(height: 10),
-            _field(_emailCtrl, 'Admin Email *', Icons.mail_outline_rounded, TextInputType.emailAddress),
-            const SizedBox(height: 10),
-            TextField(
-              controller: _passCtrl, obscureText: _obscure,
-              decoration: InputDecoration(
-                labelText: 'Admin Password *',
-                prefixIcon: const Icon(Icons.lock_outline_rounded, size: 18, color: AppColors.textMuted),
-                suffixIcon: GestureDetector(
-                  onTap: () => setState(() => _obscure = !_obscure),
-                  child: Icon(_obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined, size: 18, color: AppColors.textMuted),
-                ),
-              ),
-            ),
-            const SizedBox(height: 10),
-            _field(_phoneCtrl, 'Phone (optional)', Icons.phone_outlined, TextInputType.phone),
-
-            if (_error != null) ...[
-              const SizedBox(height: 10),
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(color: AppColors.pink.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(10)),
-                child: Text(_error!, style: GoogleFonts.inter(fontSize: 12, color: const Color(0xFFD04060))),
-              ),
-            ],
-            const SizedBox(height: 20),
-            GradientButton(label: 'Create Project', onTap: _save, isLoading: _loading, icon: Icons.add_business_outlined, gradient: AppColors.gradientSecondary),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _field(TextEditingController c, String label, IconData icon, [TextInputType? type]) {
-    return TextField(controller: c, keyboardType: type, decoration: InputDecoration(labelText: label, prefixIcon: Icon(icon, size: 18, color: AppColors.textMuted)));
-  }
-}
 
 // ─── All Users Screen ─────────────────────────────────────────────────────────
 class _AllUsersScreen extends StatefulWidget {
@@ -1736,6 +1262,7 @@ class _AllUsersScreenState extends State<_AllUsersScreen> {
               itemCount: filtered.length,
               itemBuilder: (_, i) {
                 final u = filtered[i];
+                final isSelf = state.currentUser?.id == u.id;
                 return Container(
                   margin: const EdgeInsets.only(bottom: 8),
                   padding: const EdgeInsets.all(14),
@@ -1744,42 +1271,115 @@ class _AllUsersScreenState extends State<_AllUsersScreen> {
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(color: u.role == UserRole.masterAdmin ? AppColors.peach.withValues(alpha: 0.4) : AppColors.border),
                   ),
-                  child: Row(
+                  child: Column(
                     children: [
-                      AvatarWidget(
-                        initials: u.initials,
-                        size: 40,
-                        gradient: u.role == UserRole.masterAdmin
-                            ? AppColors.gradientSecondary
-                            : u.role == UserRole.companyAdmin
-                                ? AppColors.gradientPrimary
-                                : AppColors.gradientTertiary,
+                      Row(
+                        children: [
+                          AvatarWidget(
+                            initials: u.initials,
+                            size: 40,
+                            gradient: u.role == UserRole.masterAdmin
+                                ? AppColors.gradientSecondary
+                                : u.role == UserRole.companyAdmin
+                                    ? AppColors.gradientPrimary
+                                    : AppColors.gradientTertiary,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(children: [
+                                  Expanded(child: Text(u.name, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary))),
+                                  if (isSelf)
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(color: AppColors.lavender.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(6)),
+                                      child: Text('You', style: GoogleFonts.inter(fontSize: 9, fontWeight: FontWeight.w700, color: AppColors.lavender)),
+                                    ),
+                                ]),
+                                Text(u.email, style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted)),
+                                if (u.companyName != null) Text(u.companyName!, style: GoogleFonts.inter(fontSize: 10, color: AppColors.lavender)),
+                              ],
+                            ),
+                          ),
+                          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                            StatusPill(
+                              label: u.roleLabel,
+                              color: u.role == UserRole.masterAdmin ? AppColors.peach : u.role == UserRole.companyAdmin ? AppColors.lavender : AppColors.sky,
+                              isSmall: true,
+                            ),
+                            const SizedBox(height: 4),
+                            StatusPill(label: u.isActive ? 'Active' : 'Inactive', color: u.isActive ? AppColors.mint : AppColors.stageLost, isSmall: true),
+                          ]),
+                        ],
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(u.name, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-                            Text(u.email, style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted)),
-                            if (u.companyName != null) Text(u.companyName!, style: GoogleFonts.inter(fontSize: 10, color: AppColors.lavender)),
-                          ],
-                        ),
+                      const SizedBox(height: 8),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          _userActionBtn(Icons.edit_outlined, AppColors.lavender, () => _showEditUserSheet(context, state, u)),
+                          const SizedBox(width: 6),
+                          _userActionBtn(
+                            u.isActive ? Icons.pause_circle_outline_rounded : Icons.play_circle_outline_rounded,
+                            u.isActive ? AppColors.peach : AppColors.mint,
+                            isSelf ? null : () => state.toggleUserActive(u.id),
+                          ),
+                          const SizedBox(width: 6),
+                          _userActionBtn(
+                            Icons.delete_outline_rounded,
+                            AppColors.pink,
+                            isSelf ? null : () => _confirmDeleteUser(context, state, u),
+                          ),
+                        ],
                       ),
-                      Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                        StatusPill(
-                          label: u.roleLabel,
-                          color: u.role == UserRole.masterAdmin ? AppColors.peach : u.role == UserRole.companyAdmin ? AppColors.lavender : AppColors.sky,
-                          isSmall: true,
-                        ),
-                        const SizedBox(height: 4),
-                        StatusPill(label: u.isActive ? 'Active' : 'Inactive', color: u.isActive ? AppColors.mint : AppColors.stageLost, isSmall: true),
-                      ]),
                     ],
                   ),
                 );
               },
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _userActionBtn(IconData icon, Color color, VoidCallback? onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 30, height: 30,
+        decoration: BoxDecoration(
+          color: onTap == null ? AppColors.border.withValues(alpha: 0.3) : color.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Icon(icon, size: 15, color: onTap == null ? AppColors.textMuted.withValues(alpha: 0.4) : color),
+      ),
+    );
+  }
+
+  void _showEditUserSheet(BuildContext context, AppState state, AppUser user) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _EditUserSheet(state: state, user: user),
+    );
+  }
+
+  void _confirmDeleteUser(BuildContext context, AppState state, AppUser user) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.background,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('Remove User', style: GoogleFonts.inter(fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+        content: Text('Remove "${user.name}" from the platform?', style: GoogleFonts.inter(fontSize: 13, color: AppColors.textSecondary)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Cancel', style: GoogleFonts.inter(color: AppColors.textMuted))),
+          TextButton(
+            onPressed: () { Navigator.pop(ctx); state.deleteUser(user.id); },
+            child: Text('Remove', style: GoogleFonts.inter(color: AppColors.pink, fontWeight: FontWeight.w600)),
           ),
         ],
       ),
@@ -1938,6 +1538,143 @@ class _AddMasterAdminSheetState extends State<_AddMasterAdminSheet> {
 
   Widget _field(TextEditingController c, String label, IconData icon, [TextInputType? type]) {
     return TextField(controller: c, keyboardType: type, decoration: InputDecoration(labelText: label, prefixIcon: Icon(icon, size: 18, color: AppColors.textMuted)));
+  }
+}
+
+// ─── Edit User Sheet (Master Admin — can edit any user) ──────────────────────
+class _EditUserSheet extends StatefulWidget {
+  final AppState state;
+  final AppUser user;
+  const _EditUserSheet({required this.state, required this.user});
+  @override
+  State<_EditUserSheet> createState() => _EditUserSheetState();
+}
+
+class _EditUserSheetState extends State<_EditUserSheet> {
+  late final TextEditingController _nameCtrl;
+  late final TextEditingController _emailCtrl;
+  late final TextEditingController _passCtrl;
+  bool _obscure = true;
+  bool _loading = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameCtrl = TextEditingController(text: widget.user.name);
+    _emailCtrl = TextEditingController(text: widget.user.email);
+    _passCtrl = TextEditingController(text: widget.user.password);
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose(); _emailCtrl.dispose(); _passCtrl.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    if (_nameCtrl.text.trim().isEmpty || _emailCtrl.text.trim().isEmpty || _passCtrl.text.trim().isEmpty) {
+      setState(() => _error = 'All fields are required');
+      return;
+    }
+    if (_passCtrl.text.length < 6) {
+      setState(() => _error = 'Password must be at least 6 characters');
+      return;
+    }
+    // Check email duplication (allow same email for the same user)
+    final emailLower = _emailCtrl.text.trim().toLowerCase();
+    final duplicate = widget.state.users.any((u) =>
+        u.id != widget.user.id && u.email.toLowerCase() == emailLower);
+    if (duplicate) {
+      setState(() => _error = 'This email is already in use');
+      return;
+    }
+    setState(() { _loading = true; _error = null; });
+    final updated = AppUser(
+      id: widget.user.id,
+      name: _nameCtrl.text.trim(),
+      email: _emailCtrl.text.trim(),
+      password: _passCtrl.text.trim(),
+      role: widget.user.role,
+      companyId: widget.user.companyId,
+      companyName: widget.user.companyName,
+      isActive: widget.user.isActive,
+      isApproved: widget.user.isApproved,
+      hasLoggedInBefore: widget.user.hasLoggedInBefore,
+      createdAt: widget.user.createdAt,
+    );
+    widget.state.updateUser(updated);
+    if (!mounted) return;
+    Navigator.pop(context);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('${updated.name} updated successfully!', style: GoogleFonts.inter()),
+      backgroundColor: const Color(0xFF3B8A6E),
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final u = widget.user;
+    final roleColor = u.role == UserRole.masterAdmin ? AppColors.peach
+        : u.role == UserRole.companyAdmin ? AppColors.lavender : AppColors.sky;
+    return Container(
+      margin: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(24)),
+      child: SingleChildScrollView(
+        padding: EdgeInsets.fromLTRB(24, 24, 24, MediaQuery.of(context).viewInsets.bottom + 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(children: [
+              AvatarWidget(initials: u.initials, size: 40,
+                  gradient: u.role == UserRole.masterAdmin ? AppColors.gradientSecondary
+                      : u.role == UserRole.companyAdmin ? AppColors.gradientPrimary : AppColors.gradientTertiary),
+              const SizedBox(width: 12),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Edit User', style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                StatusPill(label: u.roleLabel, color: roleColor, isSmall: true),
+              ])),
+              IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close_rounded, color: AppColors.textMuted)),
+            ]),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _nameCtrl,
+              decoration: const InputDecoration(labelText: 'Full Name', prefixIcon: Icon(Icons.person_outline_rounded, size: 18, color: AppColors.textMuted)),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _emailCtrl,
+              keyboardType: TextInputType.emailAddress,
+              decoration: const InputDecoration(labelText: 'Email', prefixIcon: Icon(Icons.mail_outline_rounded, size: 18, color: AppColors.textMuted)),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _passCtrl,
+              obscureText: _obscure,
+              decoration: InputDecoration(
+                labelText: 'Password',
+                prefixIcon: const Icon(Icons.lock_outline_rounded, size: 18, color: AppColors.textMuted),
+                suffixIcon: GestureDetector(
+                  onTap: () => setState(() => _obscure = !_obscure),
+                  child: Icon(_obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined, size: 18, color: AppColors.textMuted),
+                ),
+              ),
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: 10),
+              Text(_error!, style: GoogleFonts.inter(fontSize: 12, color: AppColors.pink)),
+            ],
+            const SizedBox(height: 20),
+            _loading
+                ? const Center(child: CircularProgressIndicator())
+                : GradientButton(label: 'Save Changes', onTap: _save, icon: Icons.save_rounded),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -2598,7 +2335,6 @@ class _MasterReportsScreen extends StatelessWidget {
     );
   }
 
-  String _fmtDate(DateTime dt) => '${dt.day}/${dt.month}/${dt.year.toString().substring(2)}';
 }
 
 // ─── Master Alert Sheet ───────────────────────────────────────────────────────
