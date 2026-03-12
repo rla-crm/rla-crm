@@ -20,11 +20,10 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard>
   late AnimationController _fadeCtrl;
   late Animation<double> _fadeAnim;
 
-  static const _tabs = ['Overview', 'Approvals', 'Companies', 'Projects', 'Analytics', 'Users', 'Reports'];
+  static const _tabs = ['Overview', 'Approvals', 'Projects', 'Analytics', 'Users', 'Reports'];
   static const _icons = [
     Icons.dashboard_outlined,
     Icons.pending_actions_outlined,
-    Icons.business_outlined,
     Icons.apartment_outlined,
     Icons.analytics_outlined,
     Icons.people_outline_rounded,
@@ -168,11 +167,10 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard>
     switch (_tab) {
       case 0: return const _MasterOverview();
       case 1: return const _ApprovalsScreen();
-      case 2: return const _CompaniesScreen();
-      case 3: return const _MasterProjectsScreen();
-      case 4: return const _MasterAnalyticsScreen();
-      case 5: return const _AllUsersScreen();
-      case 6: return const _MasterReportsScreen();
+      case 2: return const _MasterProjectsScreen();
+      case 3: return const _MasterAnalyticsScreen();
+      case 4: return const _AllUsersScreen();
+      case 5: return const _MasterReportsScreen();
       default: return const _MasterOverview();
     }
   }
@@ -479,7 +477,6 @@ class _MasterOverview extends StatelessWidget {
                 mainAxisSpacing: 12,
                 childAspectRatio: 1.5,
                 children: [
-                  _statCard('Companies', state.totalCompanies.toString(), Icons.business_outlined, AppColors.gradientSecondary),
                   _statCard('Total Projects', allProjects.length.toString(), Icons.apartment_outlined, AppColors.gradientPrimary),
                   _statCard('Total Leads', totalLeads.toString(), Icons.trending_up_rounded, AppColors.gradientTertiary),
                   _statCard('Closures', totalClosures.toString(), Icons.check_circle_outline_rounded, AppColors.gradientSuccess),
@@ -576,10 +573,7 @@ class _MasterOverview extends StatelessWidget {
             ..._topProjects(state),
             const SizedBox(height: 16),
 
-            // Recent companies
-            Text('Recent Companies', style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-            const SizedBox(height: 10),
-            ...state.recentCompanies.map((c) => _companyRow(context, c)),
+
           ],
         ),
       ),
@@ -1042,7 +1036,6 @@ class _MasterAnalyticsScreen extends StatelessWidget {
                   _kpiCard('Closures', totalClosures.toString(), Icons.check_circle_outline_rounded, AppColors.gradientSuccess),
                   _kpiCard('Conv. Rate', '${conversionRate.toStringAsFixed(1)}%', Icons.donut_large_rounded, AppColors.gradientCTA),
                   _kpiCard('Projects', state.projects.length.toString(), Icons.apartment_outlined, AppColors.gradientPrimary),
-                  _kpiCard('Companies', state.totalCompanies.toString(), Icons.business_outlined, AppColors.gradientSecondary),
                   _kpiCard('Users', state.totalAllUsers.toString(), Icons.people_outline_rounded, const LinearGradient(colors: [AppColors.sky, AppColors.teal])),
                 ],
               );
