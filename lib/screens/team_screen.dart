@@ -320,7 +320,7 @@ class _UserSheetState extends State<_UserSheet> {
       password: _passCtrl.text.trim(),
       role: _role,
       companyId: state.currentCompanyId,
-      companyName: state.currentCompany?.name,
+      companyName: state.currentUser?.companyName,
       isActive: widget.existing?.isActive ?? true,
       isApproved: true, // Admin directly creates = pre-approved
       createdAt: widget.existing?.createdAt,

@@ -22,6 +22,8 @@ enum NotificationPriority { low, medium, high }
 enum ProjectStatus { active, onHold, completed }
 
 // Approval request types and status
+// Note: companyRegistration is kept for backward compatibility with stored data,
+// but is no longer used in the UI — all signups are now employeeSignup.
 enum ApprovalType { companyRegistration, employeeSignup }
 
 enum ApprovalStatus { pending, approved, rejected }
@@ -251,85 +253,8 @@ class EmailLog {
       );
 }
 
-// ─── Company Model ────────────────────────────────────────────────────────────
-
-class Company {
-  final String id;
-  String name;
-  String adminEmail;
-  String adminName;
-  String? phone;
-  String? website;
-  String? address;
-  bool isActive;
-  bool isApproved;           // requires master admin approval
-  final DateTime createdAt;
-  DateTime updatedAt;
-  int totalLeads;
-  int totalUsers;
-
-  Company({
-    String? id,
-    required this.name,
-    required this.adminEmail,
-    required this.adminName,
-    this.phone,
-    this.website,
-    this.address,
-    this.isActive = true,
-    this.isApproved = false,
-    DateTime? createdAt,
-    DateTime? updatedAt,
-    this.totalLeads = 0,
-    this.totalUsers = 1,
-  })  : id = id ?? _uuid.v4(),
-        createdAt = createdAt ?? DateTime.now(),
-        updatedAt = updatedAt ?? DateTime.now();
-
-  int get daysElapsed {
-    return DateTime.now().difference(createdAt).inDays;
-  }
-
-  bool get isFirstLogin => false; // tracked separately in AppState
-
-  Map<String, dynamic> toMap() => {
-        'id': id,
-        'name': name,
-        'adminEmail': adminEmail,
-        'adminName': adminName,
-        'phone': phone,
-        'website': website,
-        'address': address,
-        'isActive': isActive,
-        'isApproved': isApproved,
-        'createdAt': createdAt.toIso8601String(),
-        'updatedAt': updatedAt.toIso8601String(),
-        'totalLeads': totalLeads,
-        'totalUsers': totalUsers,
-      };
-
-  factory Company.fromMap(Map<String, dynamic> map) => Company(
-        id: map['id'],
-        name: map['name'],
-        adminEmail: map['adminEmail'] ?? '',
-        adminName: map['adminName'] ?? '',
-        phone: map['phone'],
-        website: map['website'],
-        address: map['address'],
-        isActive: map['isActive'] ?? true,
-        isApproved: map['isApproved'] ?? true, // legacy data defaults to approved
-        createdAt: DateTime.parse(map['createdAt']),
-        updatedAt: DateTime.parse(map['updatedAt']),
-        totalLeads: map['totalLeads'] ?? 0,
-        totalUsers: map['totalUsers'] ?? 1,
-      );
-
-  String get initials {
-    final parts = name.trim().split(' ');
-    if (parts.length >= 2) return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
-    return name.isNotEmpty ? name[0].toUpperCase() : '?';
-  }
-}
+// Company class removed — replaced by project-centric model.
+// All multi-tenancy is now handled through RealEstateProject + companyId == projectId.
 
 // ─── AppUser Model ────────────────────────────────────────────────────────────
 

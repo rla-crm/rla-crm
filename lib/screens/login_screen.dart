@@ -288,29 +288,16 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
             children: [
               Text('New to RLA CRM?',
                   style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+              const SizedBox(height: 6),
+              Text('Contact your Master Admin to be added as a Project Admin, or join an existing project as a Sales Team member.',
+                  style: GoogleFonts.inter(fontSize: 11, color: AppColors.textSecondary), textAlign: TextAlign.center),
               const SizedBox(height: 14),
-              Row(
-                children: [
-                  Expanded(
-                    child: _signupBtn(
-                      'Register Project',
-                      'Register your project',
-                      Icons.business_outlined,
-                      AppColors.gradientPrimary,
-                      _showProjectSignup,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _signupBtn(
-                      'Join Sales Team',
-                      'Request access',
-                      Icons.person_add_outlined,
-                      AppColors.gradientTertiary,
-                      _showSalesTeamSignup,
-                    ),
-                  ),
-                ],
+              _signupBtn(
+                'Join Sales Team',
+                'Request access to a project',
+                Icons.person_add_outlined,
+                AppColors.gradientTertiary,
+                _showSalesTeamSignup,
               ),
             ],
           ),
@@ -396,13 +383,6 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
     );
   }
 
-  void _showProjectSignup() {
-    showModalBottomSheet(
-      context: context, isScrollControlled: true, backgroundColor: Colors.transparent,
-      builder: (_) => const _ProjectSignupSheet(),
-    );
-  }
-
   void _showSalesTeamSignup() {
     showModalBottomSheet(
       context: context, isScrollControlled: true, backgroundColor: Colors.transparent,
@@ -418,166 +398,7 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
   }
 }
 
-// ─── Project (Company) Signup Sheet ───────────────────────────────────────────
-class _ProjectSignupSheet extends StatefulWidget {
-  const _ProjectSignupSheet();
-  @override
-  State<_ProjectSignupSheet> createState() => _ProjectSignupSheetState();
-}
-
-class _ProjectSignupSheetState extends State<_ProjectSignupSheet> {
-  final _companyCtrl = TextEditingController();
-  final _nameCtrl    = TextEditingController();
-  final _emailCtrl   = TextEditingController();
-  final _passCtrl    = TextEditingController();
-  final _phoneCtrl   = TextEditingController();
-  bool   _obscure  = true;
-  bool   _loading  = false;
-  String? _error;
-
-  @override
-  void dispose() {
-    _companyCtrl.dispose(); _nameCtrl.dispose(); _emailCtrl.dispose();
-    _passCtrl.dispose();    _phoneCtrl.dispose();
-    super.dispose();
-  }
-
-  void _signup() async {
-    if (_companyCtrl.text.trim().isEmpty || _nameCtrl.text.trim().isEmpty ||
-        _emailCtrl.text.trim().isEmpty   || _passCtrl.text.trim().isEmpty) {
-      setState(() => _error = 'All fields except phone are required'); return;
-    }
-    if (_passCtrl.text.length < 6) {
-      setState(() => _error = 'Password must be at least 6 characters'); return;
-    }
-    setState(() { _loading = true; _error = null; });
-    await Future.delayed(const Duration(milliseconds: 500));
-    if (!mounted) return;
-    final err = context.read<AppState>().submitCompanyRegistration(
-      companyName: _companyCtrl.text.trim(),
-      adminName:   _nameCtrl.text.trim(),
-      email:       _emailCtrl.text.trim(),
-      password:    _passCtrl.text.trim(),
-      phone: _phoneCtrl.text.trim().isEmpty ? null : _phoneCtrl.text.trim(),
-    );
-    if (!mounted) return;
-    if (err != null) {
-      setState(() { _loading = false; _error = err; });
-    } else {
-      Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Row(children: [
-          const Icon(Icons.hourglass_top_rounded, color: Colors.white, size: 16),
-          const SizedBox(width: 8),
-          Expanded(child: Text(
-            'Registration submitted! Our team will review and approve your project within 24 hours.',
-            style: GoogleFonts.inter(fontSize: 12),
-          )),
-        ]),
-        backgroundColor: const Color(0xFF5B3FBF),
-        duration: const Duration(seconds: 6),
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      ));
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(24)),
-      child: SingleChildScrollView(
-        padding: EdgeInsets.fromLTRB(24, 24, 24, MediaQuery.of(context).viewInsets.bottom + 24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              children: [
-                Container(width: 36, height: 36,
-                    decoration: BoxDecoration(gradient: AppColors.gradientPrimary, borderRadius: BorderRadius.circular(10)),
-                    child: const Icon(Icons.business_outlined, size: 18, color: Colors.white)),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Register Your Project', style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                      Text('Register your project for access · Approval within 24h', style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted)),
-                    ],
-                  ),
-                ),
-                IconButton(onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.close_rounded, color: AppColors.textMuted)),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppColors.peach.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.peach.withValues(alpha: 0.4)),
-              ),
-              child: Row(children: [
-                const Icon(Icons.info_outline_rounded, size: 16, color: Color(0xFFD08020)),
-                const SizedBox(width: 8),
-                Expanded(child: Text(
-                  'Your registration will be reviewed by our Master Admin and approved within 24 hours.',
-                  style: GoogleFonts.inter(fontSize: 11, color: const Color(0xFFD08020)),
-                )),
-              ]),
-            ),
-            const SizedBox(height: 16),
-            _sheetField(_companyCtrl, 'Project Name *', Icons.apartment_outlined),
-            const SizedBox(height: 12),
-            _sheetField(_nameCtrl, 'Your Name *',    Icons.person_outline_rounded),
-            const SizedBox(height: 12),
-            _sheetField(_emailCtrl, 'Email Address *', Icons.mail_outline_rounded, TextInputType.emailAddress),
-            const SizedBox(height: 12),
-            _sheetField(_phoneCtrl, 'Phone Number',    Icons.phone_outlined, TextInputType.phone),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _passCtrl, obscureText: _obscure,
-              decoration: InputDecoration(
-                labelText: 'Password *',
-                prefixIcon: const Icon(Icons.lock_outline_rounded, size: 18, color: AppColors.textMuted),
-                suffixIcon: GestureDetector(
-                  onTap: () => setState(() => _obscure = !_obscure),
-                  child: Icon(_obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined,
-                      size: 18, color: AppColors.textMuted),
-                ),
-              ),
-            ),
-            if (_error != null) ...[
-              const SizedBox(height: 10),
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(color: AppColors.pink.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(10)),
-                child: Text(_error!, style: GoogleFonts.inter(fontSize: 12, color: const Color(0xFFD04060))),
-              ),
-            ],
-            const SizedBox(height: 20),
-            GradientButton(label: 'Submit Registration', onTap: _signup, isLoading: _loading, icon: Icons.send_outlined),
-            const SizedBox(height: 10),
-            Center(child: Text('Registration is free · Approval within 24h',
-                style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted))),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _sheetField(TextEditingController c, String label, IconData icon, [TextInputType? type]) {
-    return TextField(
-      controller: c, keyboardType: type,
-      decoration: InputDecoration(labelText: label, prefixIcon: Icon(icon, size: 18, color: AppColors.textMuted)),
-    );
-  }
-}
-
-// ─── Sales Team Signup Sheet ──────────────────────────────────────────────────
+// ─── Sales Team Signup Sheet ──────────────────────────────────────────────────────
 class _SalesTeamSignupSheet extends StatefulWidget {
   const _SalesTeamSignupSheet();
   @override

@@ -133,7 +133,7 @@ class _AdminDashboardState extends State<AdminDashboard> with TickerProviderStat
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(state.currentCompany?.name ?? 'Company', style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary), maxLines: 1, overflow: TextOverflow.ellipsis),
+                      Text(state.currentUser?.companyName ?? 'Project Admin', style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary), maxLines: 1, overflow: TextOverflow.ellipsis),
                       Text(state.currentUser?.name ?? '', style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted), maxLines: 1, overflow: TextOverflow.ellipsis),
                     ],
                   ),
@@ -193,7 +193,9 @@ class _AdminSidebar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
-    final company = state.currentCompany;
+    final projectName = state.currentUser?.companyName ?? 'Project';
+    final adminName = state.currentUser?.name ?? '';
+    final initials = state.currentUser?.initials ?? 'A';
     return Container(
       width: 220,
       decoration: BoxDecoration(
@@ -211,13 +213,13 @@ class _AdminSidebar extends StatelessWidget {
                 children: [
                   Container(width: 36, height: 36,
                     decoration: BoxDecoration(gradient: AppColors.gradientPrimary, borderRadius: BorderRadius.circular(10)),
-                    child: Center(child: Text(company?.initials ?? 'A', style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w800, color: Colors.white)))),
+                    child: Center(child: Text(initials, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w800, color: Colors.white)))),
                   const SizedBox(width: 10),
                   Expanded(child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(company?.name ?? 'Company', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary), maxLines: 1, overflow: TextOverflow.ellipsis),
-                      Text(company?.adminName ?? '', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
+                      Text(projectName, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary), maxLines: 1, overflow: TextOverflow.ellipsis),
+                      Text(adminName, style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
                     ],
                   )),
                 ],
@@ -403,11 +405,9 @@ class _AdminHome extends StatelessWidget {
                     children: [
                       Text(_greeting(), style: GoogleFonts.inter(fontSize: 13, color: AppColors.textMuted)),
                       Text(state.currentUser?.name ?? 'Admin', style: GoogleFonts.inter(fontSize: 22, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
-                      // Show project/company name under greeting
+                      // Show project name under greeting
                       Builder(builder: (ctx) {
-                        // For project admins, companyName holds the project name
-                        final label = state.currentUser?.companyName
-                            ?? state.currentCompany?.name;
+                        final label = state.currentUser?.companyName;
                         if (label == null || label.isEmpty) return const SizedBox.shrink();
                         return Text(label, style: GoogleFonts.inter(fontSize: 12, color: AppColors.lavender, fontWeight: FontWeight.w500));
                       }),
@@ -1001,7 +1001,7 @@ class _ProfileSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final user = state.currentUser!;
-    final company = state.currentCompany;
+    final projectName = user.companyName;
     return Container(
       margin: const EdgeInsets.all(16),
       decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(24)),
@@ -1015,10 +1015,10 @@ class _ProfileSheet extends StatelessWidget {
           Text(user.email, style: GoogleFonts.inter(fontSize: 13, color: AppColors.textMuted)),
           const SizedBox(height: 8),
           StatusPill(label: user.roleLabel, color: AppColors.lavender),
-          if (company != null) ...[
+          if (projectName != null && projectName.isNotEmpty) ...[
             const SizedBox(height: 6),
-            Text(company.name, style: GoogleFonts.inter(fontSize: 12, color: AppColors.textSecondary)),
-            StatusPill(label: company.isActive ? 'Active' : 'Inactive', color: company.isActive ? const Color(0xFFB8FFE4) : const Color(0xFFE0E0E8), isSmall: true),
+            Text(projectName, style: GoogleFonts.inter(fontSize: 12, color: AppColors.textSecondary)),
+            StatusPill(label: 'Active', color: const Color(0xFFB8FFE4), isSmall: true),
           ],
           const SizedBox(height: 24),
           GradientButton(

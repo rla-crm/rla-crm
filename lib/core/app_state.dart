@@ -17,7 +17,6 @@ class AppState extends ChangeNotifier {
   late Box _leadsBox;
   late Box _notifBox;
   late Box _projectsBox;
-  late Box _companiesBox;
   late Box _approvalsBox;
   late Box _emailLogsBox;
   late Box _settingsBox;
@@ -27,13 +26,11 @@ class AppState extends ChangeNotifier {
   List<Lead> _leads = [];
   List<CrmNotification> _notifications = [];
   List<RealEstateProject> _projects = [];
-  List<Company> _companies = [];
   List<ApprovalRequest> _approvals = [];
   List<EmailLog> _emailLogs = [];
 
   // ─── Getters ─────────────────────────────────────────────────────────────
   AppUser? get currentUser => _currentUser;
-  List<Company> get companies => List.unmodifiable(_companies);
   List<AppUser> get users => List.unmodifiable(_users);
   List<Lead> get leads => List.unmodifiable(_leads);
   List<CrmNotification> get notifications => List.unmodifiable(_notifications);
@@ -48,18 +45,17 @@ class AppState extends ChangeNotifier {
 
   String? get currentCompanyId => _currentUser?.companyId;
 
-  Company? get currentCompany {
-    if (currentCompanyId == null) return null;
-    try { return _companies.firstWhere((c) => c.id == currentCompanyId); }
-    catch (_) { return null; }
-  }
+  // currentCompany is no longer a Company object — returns null (company module removed)
+  // For compatibility, kept as a getter returning null
+  dynamic get currentCompany => null;
 
   // ─── Approval getters ─────────────────────────────────────────────────────
   List<ApprovalRequest> get pendingApprovals =>
       _approvals.where((a) => a.status == ApprovalStatus.pending).toList();
 
+  /// Master admin sees all pending employee-signup requests (no company registration)
   List<ApprovalRequest> get masterAdminPendingApprovals =>
-      pendingApprovals.where((a) => a.type == ApprovalType.companyRegistration).toList();
+      pendingApprovals.where((a) => a.type == ApprovalType.employeeSignup).toList();
 
   List<ApprovalRequest> get companyPendingApprovals {
     if (!isCompanyAdmin) return [];
@@ -76,10 +72,10 @@ class AppState extends ChangeNotifier {
     return 0;
   }
 
-  // ─── Company-scoped getters ───────────────────────────────────────────────
+  // ─── Project-scoped getters ───────────────────────────────────────────────
   // NOTE: For project admins created by master admin, their companyId == projectId.
-  // Projects created by master admin may have companyId='rla_platform' until an admin
-  // is assigned. We match on BOTH p.companyId == currentCompanyId AND p.id == currentCompanyId.
+  // Projects created by master admin start with companyId='rla_platform' until an admin is assigned.
+  // We match on BOTH p.companyId == currentCompanyId AND p.id == currentCompanyId.
   List<RealEstateProject> get companyProjects {
     if (isMasterAdmin) return _projects;
     final cid = currentCompanyId;
@@ -91,7 +87,6 @@ class AppState extends ChangeNotifier {
     if (isMasterAdmin) return _users;
     final cid = currentCompanyId;
     if (cid == null) return [];
-    // Include users whose companyId matches, plus self
     return _users.where((u) => u.companyId == cid).toList();
   }
 
@@ -99,7 +94,6 @@ class AppState extends ChangeNotifier {
     if (isMasterAdmin) return _leads;
     final cid = currentCompanyId;
     if (cid == null) return [];
-    // Match leads by companyId OR by projectId (for leads assigned to projects the admin owns)
     final myProjectIds = companyProjects.map((p) => p.id).toSet();
     return _leads.where((l) => l.companyId == cid || myProjectIds.contains(l.projectId)).toList();
   }
@@ -203,18 +197,8 @@ class AppState extends ChangeNotifier {
   }
 
   // ─── Master Admin analytics ───────────────────────────────────────────────
-  int get totalCompanies => _companies.length;
-  int get activeCompanies => _companies.where((c) => c.isActive && c.isApproved).length;
   int get totalAllLeads => _leads.length;
   int get totalAllUsers => _users.length;
-
-  // ─── Company Analytics ─────────────────────────────────────────────────────
-  List<Company> get approvedCompanies => _companies.where((c) => c.isApproved).toList();
-
-  List<Company> get recentCompanies {
-    final sorted = List<Company>.from(approvedCompanies)..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-    return sorted.take(5).toList();
-  }
 
   // ─── Master Admin Project & Lead Analytics ─────────────────────────────────
   int get totalAllProjects => _projects.length;
@@ -224,16 +208,23 @@ class AppState extends ChangeNotifier {
     return (totalAllClosures / _leads.length) * 100;
   }
 
+  /// Returns per-project stats including admin info. No Company dependency.
   Map<String, Map<String, dynamic>> get allProjectsStats {
     final map = <String, Map<String, dynamic>>{};
     for (final p in _projects) {
       final pLeads = _leads.where((l) => l.projectId == p.id).toList();
       final closed = pLeads.where((l) => l.status == LeadStatus.closed).length;
-      final company = _companies.firstWhere((c) => c.id == p.companyId,
-          orElse: () => Company(id: p.companyId, name: 'Unknown', adminEmail: '', adminName: ''));
+      // Find project admin
+      String adminName = 'No admin assigned';
+      try {
+        final admin = _users.firstWhere(
+          (u) => u.companyId == p.id && u.role == UserRole.companyAdmin && u.isApproved,
+        );
+        adminName = admin.name;
+      } catch (_) {}
       map[p.id] = {
         'project': p,
-        'company': company,
+        'adminName': adminName,
         'totalLeads': pLeads.length,
         'closed': closed,
         'siteVisit': pLeads.where((l) => l.status == LeadStatus.siteVisit).length,
@@ -252,22 +243,20 @@ class AppState extends ChangeNotifier {
     return map;
   }
 
-  int usersForCompany(String companyId) =>
-      _users.where((u) => u.companyId == companyId && u.isApproved).length;
+  int usersForProject(String projectId) =>
+      _users.where((u) => u.companyId == projectId && u.isApproved).length;
 
-  int leadsForCompany(String companyId) =>
-      _leads.where((l) => l.companyId == companyId).length;
+  int leadsForProject(String projectId) =>
+      _leads.where((l) => l.projectId == projectId).length;
 
   // ─── Init ─────────────────────────────────────────────────────────────────
   // ─── OTP / Forgot-Password store (in-memory, expires 10 min) ─────────────
   final Map<String, _OtpEntry> _otpStore = {};
 
   /// Generate a 6-digit OTP for password reset and store it.
-  /// Returns the OTP code (to display / simulate send).
   String generatePasswordResetOtp(String email) {
     final otp = (100000 + DateTime.now().millisecondsSinceEpoch % 900000).toString();
     _otpStore[email.toLowerCase()] = _OtpEntry(otp, DateTime.now().add(const Duration(minutes: 10)));
-    // Simulate email send
     _sendEmail(
       toEmail: email,
       toName: email.split('@').first,
@@ -345,82 +334,107 @@ RLA CRM Platform
 
   Future<void> init() async {
     await Hive.initFlutter();
-    _usersBox = await Hive.openBox('users_v7');
-    _leadsBox = await Hive.openBox('leads_v7');
-    _notifBox = await Hive.openBox('notifs_v7');
-    _projectsBox = await Hive.openBox('projects_v7');
-    _companiesBox = await Hive.openBox('companies_v7');
-    _approvalsBox = await Hive.openBox('approvals_v7');
-    _emailLogsBox = await Hive.openBox('email_logs_v7');
-    _settingsBox = await Hive.openBox('settings_v7');
+    _usersBox      = await Hive.openBox('users_v8');
+    _leadsBox      = await Hive.openBox('leads_v8');
+    _notifBox      = await Hive.openBox('notifs_v8');
+    _projectsBox   = await Hive.openBox('projects_v8');
+    _approvalsBox  = await Hive.openBox('approvals_v8');
+    _emailLogsBox  = await Hive.openBox('email_logs_v8');
+    _settingsBox   = await Hive.openBox('settings_v8');
+
+    // Migrate existing data from older box versions
+    await _migrateFromOldBoxes();
+
     _loadAll();
-    _cleanDemoData();   // remove legacy demo data on every startup
     if (_users.isEmpty) _seedData();
   }
 
+  /// Migrate data from v7 boxes to v8 boxes (removes company dependency)
+  Future<void> _migrateFromOldBoxes() async {
+    try {
+      // Try to migrate users from v7
+      final oldUsersBox = await Hive.openBox('users_v7');
+      if (oldUsersBox.isNotEmpty && _usersBox.isEmpty) {
+        for (final key in oldUsersBox.keys) {
+          try {
+            final v = oldUsersBox.get(key);
+            if (v != null) _usersBox.put(key, v);
+          } catch (_) {}
+        }
+      }
+      // Migrate leads
+      final oldLeadsBox = await Hive.openBox('leads_v7');
+      if (oldLeadsBox.isNotEmpty && _leadsBox.isEmpty) {
+        for (final key in oldLeadsBox.keys) {
+          try {
+            final v = oldLeadsBox.get(key);
+            if (v != null) _leadsBox.put(key, v);
+          } catch (_) {}
+        }
+      }
+      // Migrate projects
+      final oldProjectsBox = await Hive.openBox('projects_v7');
+      if (oldProjectsBox.isNotEmpty && _projectsBox.isEmpty) {
+        for (final key in oldProjectsBox.keys) {
+          try {
+            final v = oldProjectsBox.get(key);
+            if (v != null) _projectsBox.put(key, v);
+          } catch (_) {}
+        }
+      }
+      // Migrate notifications
+      final oldNotifBox = await Hive.openBox('notifs_v7');
+      if (oldNotifBox.isNotEmpty && _notifBox.isEmpty) {
+        for (final key in oldNotifBox.keys) {
+          try {
+            final v = oldNotifBox.get(key);
+            if (v != null) _notifBox.put(key, v);
+          } catch (_) {}
+        }
+      }
+      // Migrate approvals
+      final oldApprovalsBox = await Hive.openBox('approvals_v7');
+      if (oldApprovalsBox.isNotEmpty && _approvalsBox.isEmpty) {
+        for (final key in oldApprovalsBox.keys) {
+          try {
+            final v = oldApprovalsBox.get(key);
+            if (v != null) _approvalsBox.put(key, v);
+          } catch (_) {}
+        }
+      }
+      // Migrate email logs
+      final oldEmailLogsBox = await Hive.openBox('email_logs_v7');
+      if (oldEmailLogsBox.isNotEmpty && _emailLogsBox.isEmpty) {
+        for (final key in oldEmailLogsBox.keys) {
+          try {
+            final v = oldEmailLogsBox.get(key);
+            if (v != null) _emailLogsBox.put(key, v);
+          } catch (_) {}
+        }
+      }
+      // Migrate settings
+      final oldSettingsBox = await Hive.openBox('settings_v7');
+      if (oldSettingsBox.isNotEmpty) {
+        for (final key in oldSettingsBox.keys) {
+          try {
+            if (_settingsBox.get(key) == null) {
+              _settingsBox.put(key, oldSettingsBox.get(key));
+            }
+          } catch (_) {}
+        }
+      }
+    } catch (_) {
+      // Migration failed silently — fresh start
+    }
+  }
+
   void _loadAll() {
-    _companies = _companiesBox.values.map((v) => Company.fromMap(Map<String, dynamic>.from(jsonDecode(v)))).toList();
     _users = _usersBox.values.map((v) => AppUser.fromMap(Map<String, dynamic>.from(jsonDecode(v)))).toList();
     _leads = _leadsBox.values.map((v) => Lead.fromMap(Map<String, dynamic>.from(jsonDecode(v)))).toList();
     _notifications = _notifBox.values.map((v) => CrmNotification.fromMap(Map<String, dynamic>.from(jsonDecode(v)))).toList();
     _projects = _projectsBox.values.map((v) => RealEstateProject.fromMap(Map<String, dynamic>.from(jsonDecode(v)))).toList();
     _approvals = _approvalsBox.values.map((v) => ApprovalRequest.fromMap(Map<String, dynamic>.from(jsonDecode(v)))).toList();
     _emailLogs = _emailLogsBox.values.map((v) => EmailLog.fromMap(Map<String, dynamic>.from(jsonDecode(v)))).toList();
-  }
-
-  /// Called on every startup to purge legacy demo data while keeping
-  /// the master admin (aksayal@gmail.com) and any real data added later.
-  void _cleanDemoData() {
-    // IDs that belong exclusively to seeded demo content
-    const demoUserIds = {
-      'user_c1_admin', 'user_c1_s1', 'user_c1_s2',
-      'user_c2_admin', 'user_c2_s1',
-      'user_c3_admin',
-    };
-    const demoCompanyIds = {'company_001', 'company_002', 'company_003'};
-    const demoProjectIds = {'proj_001', 'proj_002', 'proj_003'};
-    const demoLeadIds = {
-      'lead_001', 'lead_002', 'lead_003', 'lead_004',
-      'lead_005', 'lead_006', 'lead_007',
-    };
-    const demoNotifIds = {'notif_001', 'notif_002'};
-    const demoApprovalIds = {'approval_001', 'approval_002'};
-
-    // Remove from Hive boxes
-    for (final id in demoUserIds) { _usersBox.delete(id); }
-    for (final id in demoCompanyIds) { _companiesBox.delete(id); }
-    for (final id in demoProjectIds) { _projectsBox.delete(id); }
-    for (final id in demoLeadIds) { _leadsBox.delete(id); }
-    for (final id in demoNotifIds) { _notifBox.delete(id); }
-    for (final id in demoApprovalIds) { _approvalsBox.delete(id); }
-
-    // Also remove any leads / projects / approvals whose companyId is a demo company
-    final extraLeadKeys = _leadsBox.keys.where((k) {
-      try {
-        final m = Map<String, dynamic>.from(jsonDecode(_leadsBox.get(k)));
-        return demoCompanyIds.contains(m['companyId']);
-      } catch (_) { return false; }
-    }).toList();
-    for (final k in extraLeadKeys) { _leadsBox.delete(k); }
-
-    final extraProjKeys = _projectsBox.keys.where((k) {
-      try {
-        final m = Map<String, dynamic>.from(jsonDecode(_projectsBox.get(k)));
-        return demoCompanyIds.contains(m['companyId']);
-      } catch (_) { return false; }
-    }).toList();
-    for (final k in extraProjKeys) { _projectsBox.delete(k); }
-
-    final extraApprovalKeys = _approvalsBox.keys.where((k) {
-      try {
-        final m = Map<String, dynamic>.from(jsonDecode(_approvalsBox.get(k)));
-        return demoCompanyIds.contains(m['companyId']);
-      } catch (_) { return false; }
-    }).toList();
-    for (final k in extraApprovalKeys) { _approvalsBox.delete(k); }
-
-    // Reload in-memory lists after cleanup
-    _loadAll();
   }
 
   void _seedData() {
@@ -435,7 +449,6 @@ RLA CRM Platform
       isApproved: true,
       hasLoggedInBefore: true,
     );
-
     _saveUser(masterAdmin);
     _loadAll();
   }
@@ -444,12 +457,10 @@ RLA CRM Platform
   void _saveLead(Lead l) => _leadsBox.put(l.id, jsonEncode(l.toMap()));
   void _saveNotification(CrmNotification n) => _notifBox.put(n.id, jsonEncode(n.toMap()));
   void _saveProject(RealEstateProject p) => _projectsBox.put(p.id, jsonEncode(p.toMap()));
-  void _saveCompany(Company c) => _companiesBox.put(c.id, jsonEncode(c.toMap()));
   void _saveApproval(ApprovalRequest a) => _approvalsBox.put(a.id, jsonEncode(a.toMap()));
   void _saveEmailLog(EmailLog e) => _emailLogsBox.put(e.id, jsonEncode(e.toMap()));
 
   // ─── Email Simulation ─────────────────────────────────────────────────────
-  /// Simulates sending an email by logging it. In production, replace with real SMTP.
   void _sendEmail({
     required String toEmail,
     required String toName,
@@ -488,7 +499,6 @@ RLA CRM Platform
     return null;
   }
 
-  // Legacy bool login kept for compatibility
   bool login(String emailOrUsername, String password) {
     return loginWithError(emailOrUsername, password) == null;
   }
@@ -498,7 +508,6 @@ RLA CRM Platform
     notifyListeners();
   }
 
-  /// Mark user as having logged in (removes first-login popup trigger)
   void markFirstLoginDone() {
     if (_currentUser == null) return;
     final updated = AppUser(
@@ -522,92 +531,13 @@ RLA CRM Platform
 
   // ─── Signup / Approval Flow ───────────────────────────────────────────────
 
-  /// Company Admin signup → goes to Master Admin for approval
-  String? submitCompanyRegistration({
-    required String companyName,
-    required String adminName,
-    required String email,
-    required String password,
-    String? phone,
-  }) {
-    // Check email not already in users
-    if (_users.any((u) => u.email.toLowerCase() == email.toLowerCase())) {
-      return 'Email already registered';
-    }
-    // Check no pending/approved approval for same email
-    if (_approvals.any((a) =>
-        a.applicantEmail.toLowerCase() == email.toLowerCase() &&
-        a.status == ApprovalStatus.pending)) {
-      return 'A registration request with this email is already pending approval';
-    }
-
-    final req = ApprovalRequest(
-      type: ApprovalType.companyRegistration,
-      applicantName: adminName,
-      applicantEmail: email,
-      companyName: companyName,
-      adminEmail: email,
-      phone: phone,
-      password: password,
-    );
-    _saveApproval(req);
-    _loadAll();
-    notifyListeners();
-
-    // Notify master admins via simulated email
-    final masterAdmins = _users.where((u) => u.role == UserRole.masterAdmin);
-    for (final ma in masterAdmins) {
-      _sendEmail(
-        toEmail: ma.email,
-        toName: ma.name,
-        subject: '📋 New Company Registration: $companyName',
-        body: '''
-Hello ${ma.name},
-
-A new company registration request has been submitted and is awaiting your approval.
-
-Company: $companyName
-Admin Name: $adminName
-Admin Email: $email
-Phone: ${phone ?? 'Not provided'}
-
-Please log in to RLA CRM to review and approve or reject this request.
-
-Best regards,
-RLA CRM Platform
-        ''',
-        triggerEvent: 'company_registration_submitted',
-      );
-    }
-
-    // Notify applicant
-    _sendEmail(
-      toEmail: email,
-      toName: adminName,
-      subject: '✅ Registration Received – RLA CRM',
-      body: '''
-Hello $adminName,
-
-Thank you for registering $companyName with RLA CRM!
-
-Your registration is currently under review by our team. You will receive an email notification once your account is approved, usually within 24 hours.
-
-Best regards,
-RLA CRM Platform
-      ''',
-      triggerEvent: 'company_registration_applicant_confirmation',
-    );
-
-    return null;
-  }
-
   /// Employee (Sales Team) signup → goes to Project Admin for approval.
-  /// [companyId] is the projectId (projects are now the top-level entity).
+  /// [companyId] stores the projectId in the project-centric flow.
   SignupResult submitEmployeeSignup({
     required String name,
     required String email,
     required String password,
-    required String companyId,   // actually a projectId in the new flow
+    required String companyId,   // projectId in the new flow
   }) {
     if (_users.any((u) => u.email.toLowerCase() == email.toLowerCase())) {
       return const SignupResult(error: 'Email already registered');
@@ -618,42 +548,32 @@ RLA CRM Platform
       return const SignupResult(error: 'A signup request with this email is already pending');
     }
 
-    // In the project-centric flow, companyId == projectId.
-    // Resolve the project name from the projects list; fall back gracefully.
+    // Resolve project name from projects list
     String projectName = 'Unknown Project';
     try {
       final proj = _projects.firstWhere((p) => p.id == companyId);
       projectName = proj.name;
     } catch (_) {
-      // Also try to find by companyId field for legacy data
       try {
         final proj = _projects.firstWhere((p) => p.companyId == companyId);
         projectName = proj.name;
-      } catch (_) {
-        // If neither matches, check companies as a final fallback
-        try {
-          final comp = _companies.firstWhere((c) => c.id == companyId && c.isApproved);
-          projectName = comp.name;
-        } catch (_) {
-          // Project/company ID not found — still allow signup (admin will review)
-        }
-      }
+      } catch (_) {}
     }
 
     final req = ApprovalRequest(
       type: ApprovalType.employeeSignup,
       applicantName: name,
       applicantEmail: email,
-      companyId: companyId,   // stores projectId so admin's companyPendingApprovals filter works
+      companyId: companyId,   // stores projectId
       companyName: projectName,
       password: password,
-      role: 'sales',           // self-signup is always for sales role
+      role: 'sales',
     );
     _saveApproval(req);
     _loadAll();
     notifyListeners();
 
-    // Notify project admins (users whose companyId == the projectId)
+    // Notify project admins
     final projectAdmins = _users.where((u) =>
         u.companyId == companyId && u.role == UserRole.companyAdmin && u.isApproved);
     for (final ca in projectAdmins) {
@@ -679,7 +599,6 @@ RLA CRM Platform
       );
     }
 
-    // Notify applicant
     _sendEmail(
       toEmail: email,
       toName: name,
@@ -702,97 +621,7 @@ RLA CRM Platform
 
   // ─── Approval Management ──────────────────────────────────────────────────
 
-  /// Approve a company registration (Master Admin only)
-  void approveCompanyRegistration(String approvalId, {String? note}) {
-    try {
-      final req = _approvals.firstWhere((a) => a.id == approvalId);
-      req.status = ApprovalStatus.approved;
-      req.reviewedBy = _currentUser?.name;
-      req.reviewNote = note;
-      req.updatedAt = DateTime.now();
-
-      // Create the company
-      final company = Company(
-        name: req.companyName ?? '',
-        adminEmail: req.adminEmail ?? req.applicantEmail,
-        adminName: req.applicantName,
-        phone: req.phone,
-        isApproved: true,
-      );
-      _saveCompany(company);
-
-      // Create the admin user
-      final user = AppUser(
-        name: req.applicantName,
-        email: req.applicantEmail,
-        password: req.password ?? 'changeme123',
-        role: UserRole.companyAdmin,
-        companyId: company.id,
-        companyName: company.name,
-        isApproved: true,
-        hasLoggedInBefore: false,
-      );
-      _saveUser(user);
-      _saveApproval(req);
-      _loadAll();
-      notifyListeners();
-
-      // Send approval email
-      _sendEmail(
-        toEmail: req.applicantEmail,
-        toName: req.applicantName,
-        subject: '🎉 Your Company is Approved – RLA CRM',
-        body: '''
-Hello ${req.applicantName},
-
-Congratulations! Your company "${req.companyName}" has been approved on RLA CRM.
-
-You can now log in with:
-Email: ${req.applicantEmail}
-Password: ${req.password ?? 'changeme123'}
-
-Start managing your real estate leads and projects right away!
-
-Best regards,
-RLA CRM Platform
-        ''',
-        triggerEvent: 'company_registration_approved',
-      );
-    } catch (_) {}
-  }
-
-  /// Reject a company registration (Master Admin only)
-  void rejectCompanyRegistration(String approvalId, {String? note}) {
-    try {
-      final req = _approvals.firstWhere((a) => a.id == approvalId);
-      req.status = ApprovalStatus.rejected;
-      req.reviewedBy = _currentUser?.name;
-      req.reviewNote = note;
-      req.updatedAt = DateTime.now();
-      _saveApproval(req);
-      _loadAll();
-      notifyListeners();
-
-      _sendEmail(
-        toEmail: req.applicantEmail,
-        toName: req.applicantName,
-        subject: '❌ Registration Request Update – RLA CRM',
-        body: '''
-Hello ${req.applicantName},
-
-We regret to inform you that your company registration request for "${req.companyName}" has not been approved at this time.
-
-${note != null ? 'Reason: $note\n\n' : ''}If you have any questions, please contact our support team.
-
-Best regards,
-RLA CRM Platform
-        ''',
-        triggerEvent: 'company_registration_rejected',
-      );
-    } catch (_) {}
-  }
-
-  /// Approve an employee signup (Project Admin only)
+  /// Approve an employee signup (Project Admin or Master Admin)
   void approveEmployeeSignup(String approvalId, {String? note}) {
     try {
       final req = _approvals.firstWhere((a) => a.id == approvalId);
@@ -801,17 +630,12 @@ RLA CRM Platform
       req.reviewNote = note;
       req.updatedAt = DateTime.now();
 
-      // Resolve display name: prefer project name, fall back to stored companyName
+      // Resolve display name from project
       String entityName = req.companyName ?? 'the project';
       try {
         final proj = _projects.firstWhere((p) => p.id == req.companyId);
         entityName = proj.name;
-      } catch (_) {
-        try {
-          final comp = _companies.firstWhere((c) => c.id == req.companyId);
-          entityName = comp.name;
-        } catch (_) {}
-      }
+      } catch (_) {}
 
       final role = req.role == 'admin' ? UserRole.companyAdmin : UserRole.sales;
       final user = AppUser(
@@ -851,7 +675,7 @@ RLA CRM Platform
     } catch (_) {}
   }
 
-  /// Reject an employee signup (Company Admin only)
+  /// Reject an employee signup (Project Admin or Master Admin)
   void rejectEmployeeSignup(String approvalId, {String? note}) {
     try {
       final req = _approvals.firstWhere((a) => a.id == approvalId);
@@ -882,32 +706,6 @@ RLA CRM Platform
     } catch (_) {}
   }
 
-  // ─── CRUD: Companies (Master Admin) ──────────────────────────────────────
-  void addCompany(Company c) { _saveCompany(c); _loadAll(); notifyListeners(); }
-  void updateCompany(Company c) { c.updatedAt = DateTime.now(); _saveCompany(c); _loadAll(); notifyListeners(); }
-  void deleteCompany(String id) {
-    _companiesBox.delete(id);
-    _users.where((u) => u.companyId == id).toList().forEach((u) => _usersBox.delete(u.id));
-    _loadAll();
-    notifyListeners();
-  }
-  void toggleCompanyActive(String id) {
-    try {
-      final c = _companies.firstWhere((c) => c.id == id);
-      final updated = Company(
-        id: c.id, name: c.name, adminEmail: c.adminEmail, adminName: c.adminName,
-        phone: c.phone, website: c.website, address: c.address,
-        isActive: !c.isActive, isApproved: c.isApproved,
-        createdAt: c.createdAt,
-        totalLeads: c.totalLeads, totalUsers: c.totalUsers,
-      );
-      _saveCompany(updated);
-      _loadAll();
-      notifyListeners();
-    } catch (_) {}
-  }
-
-
   // ─── Add Project Admin (Master Admin can create companyAdmin for any project) ─
   String? addProjectAdmin({
     required String name,
@@ -924,7 +722,6 @@ RLA CRM Platform
     if (resolvedProjectId == null || resolvedProjectId.isEmpty) {
       return 'Project not selected';
     }
-    // Look up from projects list
     RealEstateProject? project;
     try {
       project = _projects.firstWhere((p) => p.id == resolvedProjectId);
@@ -936,15 +733,13 @@ RLA CRM Platform
       email: email,
       password: password,
       role: UserRole.companyAdmin,
-      companyId: resolvedProjectId,   // user.companyId == project.id — this is the key link
+      companyId: resolvedProjectId,   // user.companyId == project.id
       companyName: project.name,
       isApproved: true,
       hasLoggedInBefore: false,
     );
     _saveUser(user);
-    // CRITICAL: Update the project's companyId to match resolvedProjectId (= project.id)
-    // This ensures companyProjects getter finds this project when admin logs in.
-    // Since companyId is final, we rebuild the project with updated companyId.
+    // CRITICAL: Update the project's companyId so companyProjects getter finds it
     if (project.companyId != resolvedProjectId) {
       final updatedProject = RealEstateProject(
         id: project.id,
@@ -963,7 +758,7 @@ RLA CRM Platform
         updatedAt: DateTime.now(),
         totalUnits: project.totalUnits,
         reraNumber: project.reraNumber,
-        companyId: resolvedProjectId,  // NOW matches user.companyId
+        companyId: resolvedProjectId,
       );
       _saveProject(updatedProject);
     }
@@ -993,7 +788,6 @@ RLA CRM Platform
   }
 
   // ─── CRUD: Master Admins ──────────────────────────────────────────────────
-  /// Create a new master admin (only existing master admins can do this)
   String? createMasterAdmin({
     required String name,
     required String email,

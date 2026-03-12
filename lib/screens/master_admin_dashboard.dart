@@ -593,7 +593,7 @@ class _MasterOverview extends StatelessWidget {
     return top.map((entry) {
       final data = entry.value;
       final project = data['project'] as RealEstateProject;
-      final company = data['company'] as Company;
+      final adminName = data['adminName'] as String;
       final totalLeads = data['totalLeads'] as int;
       final closed = data['closed'] as int;
       final rate = data['conversionRate'] as double;
@@ -622,7 +622,7 @@ class _MasterOverview extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(project.name, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-                  Text(company.name, style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted)),
+                  Text(adminName, style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted)),
                 ],
               ),
             ),
@@ -842,7 +842,7 @@ class _ApprovalCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(approval.companyName ?? 'Unknown Company', style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                      Text(approval.companyName ?? approval.applicantName, style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
                       const SizedBox(height: 4),
                       Row(children: [
                         const Icon(Icons.person_outline, size: 12, color: AppColors.textMuted),
@@ -894,7 +894,7 @@ class _ApprovalCard extends StatelessWidget {
                   ),
                   const SizedBox(width: 8),
                   GestureDetector(
-                    onTap: () => state.approveCompanyRegistration(approval.id),
+                    onTap: () => state.approveEmployeeSignup(approval.id),
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                       decoration: BoxDecoration(
@@ -947,7 +947,7 @@ class _ApprovalCard extends StatelessWidget {
           TextButton(
             onPressed: () {
               Navigator.pop(ctx);
-              state.rejectCompanyRegistration(approval.id, note: noteCtrl.text.trim().isEmpty ? null : noteCtrl.text.trim());
+              state.rejectEmployeeSignup(approval.id, note: noteCtrl.text.trim().isEmpty ? null : noteCtrl.text.trim());
             },
             child: Text('Reject', style: GoogleFonts.inter(color: Colors.red)),
           ),
@@ -1068,7 +1068,7 @@ class _MasterAnalyticsScreen extends StatelessWidget {
               ...sorted.map((entry) {
                 final data = entry.value;
                 final project = data['project'] as RealEstateProject;
-                final company = data['company'] as Company;
+                final pAdminName = data['adminName'] as String;
                 final total = data['totalLeads'] as int;
                 final closed = data['closed'] as int;
                 final siteVisit = data['siteVisit'] as int;
@@ -1104,9 +1104,9 @@ class _MasterAnalyticsScreen extends StatelessWidget {
                               children: [
                                 Text(project.name, style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
                                 Row(children: [
-                                  const Icon(Icons.business_outlined, size: 11, color: AppColors.textMuted),
+                                  const Icon(Icons.person_outline_rounded, size: 11, color: AppColors.textMuted),
                                   const SizedBox(width: 3),
-                                  Text(company.name, style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted)),
+                                  Text(pAdminName, style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted)),
                                   const SizedBox(width: 8),
                                   const Icon(Icons.location_on_outlined, size: 11, color: AppColors.textMuted),
                                   const SizedBox(width: 3),
@@ -2351,8 +2351,8 @@ class _MasterAlertSheetState extends State<_MasterAlertSheet> {
   final _titleCtrl = TextEditingController();
   final _msgCtrl = TextEditingController();
   NotificationPriority _priority = NotificationPriority.medium;
-  String _target = "companyAdmins"; // companyAdmins or specific company
-  String? _selectedCompanyId;
+  String _target = "projectAdmins"; // projectAdmins or specificProject
+  String? _selectedProjectId;
 
   @override
   void dispose() {
@@ -2369,28 +2369,28 @@ class _MasterAlertSheetState extends State<_MasterAlertSheet> {
     // ignore: unused_local_variable
     String targetCompanyId = "";
 
-    if (_target == "companyAdmins") {
-      // Send to all company admins
+    if (_target == "projectAdmins") {
+      // Send to all project admins
       targetIds = state.users
           .where((u) => u.role == UserRole.companyAdmin && u.isApproved && u.isActive)
           .map((u) => u.id)
           .toList();
       targetCompanyId = "all";
-    } else if (_selectedCompanyId != null) {
-      // Send to admins of specific company
+    } else if (_selectedProjectId != null) {
+      // Send to admins of specific project
       targetIds = state.users
-          .where((u) => u.companyId == _selectedCompanyId && u.role == UserRole.companyAdmin)
+          .where((u) => u.companyId == _selectedProjectId && u.role == UserRole.companyAdmin)
           .map((u) => u.id)
           .toList();
-      targetCompanyId = _selectedCompanyId!;
+      targetCompanyId = _selectedProjectId!;
     }
 
     if (targetIds.isEmpty) return;
 
     // Create a notification per project
-    final projectsToNotify = _target == "companyAdmins"
+    final projectsToNotify = _target == "projectAdmins"
         ? state.projects.toList()
-        : state.projects.where((p) => p.id == _selectedCompanyId).toList();
+        : state.projects.where((p) => p.id == _selectedProjectId).toList();
 
     for (final project in projectsToNotify) {
       final projectAdminIds = targetIds.where((id) {
@@ -2400,9 +2400,9 @@ class _MasterAlertSheetState extends State<_MasterAlertSheet> {
         return u?.companyId == project.id;
       }).toList();
 
-      if (projectAdminIds.isEmpty && _target != "companyAdmins") continue;
+      if (projectAdminIds.isEmpty && _target != "projectAdmins") continue;
 
-      final ids = _target == "companyAdmins" ? projectAdminIds : targetIds;
+      final ids = _target == "projectAdmins" ? projectAdminIds : targetIds;
       if (ids.isEmpty) continue;
 
       final notif = CrmNotification(
@@ -2425,9 +2425,9 @@ class _MasterAlertSheetState extends State<_MasterAlertSheet> {
         const Icon(Icons.notifications_active_rounded, color: Colors.white, size: 16),
         const SizedBox(width: 8),
         Text(
-          _target == "companyAdmins"
+          _target == "projectAdmins"
               ? "Alert sent to all Project Admins"
-              : "Alert sent to ${state.projects.where((p) => p.id == _selectedCompanyId).isNotEmpty ? state.projects.firstWhere((p) => p.id == _selectedCompanyId).name : "project"} admin",
+              : "Alert sent to ${state.projects.where((p) => p.id == _selectedProjectId).isNotEmpty ? state.projects.firstWhere((p) => p.id == _selectedProjectId).name : "project"} admin",
           style: GoogleFonts.inter(fontSize: 12),
         ),
       ]),
@@ -2508,42 +2508,42 @@ class _MasterAlertSheetState extends State<_MasterAlertSheet> {
             const SizedBox(height: 8),
             Row(children: [
               Expanded(child: GestureDetector(
-                onTap: () => setState(() => _target = "companyAdmins"),
+                onTap: () => setState(() => _target = "projectAdmins"),
                 child: Container(
                   padding: const EdgeInsets.symmetric(vertical: 10),
                   decoration: BoxDecoration(
-                    color: _target == "companyAdmins" ? AppColors.peach.withValues(alpha: 0.2) : AppColors.surface,
+                    color: _target == "projectAdmins" ? AppColors.peach.withValues(alpha: 0.2) : AppColors.surface,
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: _target == "companyAdmins" ? AppColors.peach : AppColors.border, width: _target == "companyAdmins" ? 1.5 : 1),
+                    border: Border.all(color: _target == "projectAdmins" ? AppColors.peach : AppColors.border, width: _target == "projectAdmins" ? 1.5 : 1),
                   ),
                   child: Center(child: Text("All Project Admins", style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary))),
                 ),
               )),
               const SizedBox(width: 8),
               Expanded(child: GestureDetector(
-                onTap: () => setState(() => _target = "specificCompany"),
+                onTap: () => setState(() => _target = "specificProject"),
                 child: Container(
                   padding: const EdgeInsets.symmetric(vertical: 10),
                   decoration: BoxDecoration(
-                    color: _target == "specificCompany" ? AppColors.lavender.withValues(alpha: 0.2) : AppColors.surface,
+                    color: _target == "specificProject" ? AppColors.lavender.withValues(alpha: 0.2) : AppColors.surface,
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: _target == "specificCompany" ? AppColors.lavender : AppColors.border, width: _target == "specificCompany" ? 1.5 : 1),
+                    border: Border.all(color: _target == "specificProject" ? AppColors.lavender : AppColors.border, width: _target == "specificProject" ? 1.5 : 1),
                   ),
                   child: Center(child: Text("Specific Project", style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary))),
                 ),
               )),
             ]),
-            if (_target == "specificCompany") ...[
+            if (_target == "specificProject") ...[
               const SizedBox(height: 10),
               Container(
                 decoration: BoxDecoration(
                   color: AppColors.surface,
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: _selectedCompanyId == null ? AppColors.border : AppColors.lavender, width: _selectedCompanyId == null ? 1 : 1.5),
+                  border: Border.all(color: _selectedProjectId == null ? AppColors.border : AppColors.lavender, width: _selectedProjectId == null ? 1 : 1.5),
                 ),
                 child: DropdownButtonHideUnderline(
                   child: DropdownButton<String>(
-                    value: _selectedCompanyId,
+                    value: _selectedProjectId,
                     hint: Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Text("-- Choose project --", style: GoogleFonts.inter(fontSize: 13, color: AppColors.textMuted))),
                     isExpanded: true,
                     padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -2555,7 +2555,7 @@ class _MasterAlertSheetState extends State<_MasterAlertSheet> {
                         child: Text(p.name, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w500)),
                       ),
                     )).toList(),
-                    onChanged: (v) => setState(() => _selectedCompanyId = v),
+                    onChanged: (v) => setState(() => _selectedProjectId = v),
                   ),
                 ),
               ),
