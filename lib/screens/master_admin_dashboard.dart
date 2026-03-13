@@ -2180,6 +2180,41 @@ class _MasterProjectsScreenState extends State<_MasterProjectsScreen> {
 
 // ─── Master Analytics Screen ──────────────────────────────────────────────────
 // ─── Master Reports Screen ───────────────────────────────────────────────────
+// ─── Timeline filter enum ─────────────────────────────────────────────────────
+enum _TimelineFilter {
+  all('All Time'),
+  today('Today'),
+  week('This Week'),
+  month('This Month'),
+  quarter('This Quarter'),
+  halfYear('Last 6 Months'),
+  year('This Year');
+
+  final String label;
+  const _TimelineFilter(this.label);
+
+  DateTime? get fromDate {
+    final now = DateTime.now();
+    switch (this) {
+      case _TimelineFilter.today:
+        return DateTime(now.year, now.month, now.day);
+      case _TimelineFilter.week:
+        return now.subtract(Duration(days: now.weekday - 1));
+      case _TimelineFilter.month:
+        return DateTime(now.year, now.month, 1);
+      case _TimelineFilter.quarter:
+        final q = ((now.month - 1) ~/ 3) * 3 + 1;
+        return DateTime(now.year, q, 1);
+      case _TimelineFilter.halfYear:
+        return now.subtract(const Duration(days: 180));
+      case _TimelineFilter.year:
+        return DateTime(now.year, 1, 1);
+      case _TimelineFilter.all:
+        return null;
+    }
+  }
+}
+
 class _MasterReportsScreen extends StatefulWidget {
   const _MasterReportsScreen();
 
@@ -2189,37 +2224,26 @@ class _MasterReportsScreen extends StatefulWidget {
 
 class _MasterReportsScreenState extends State<_MasterReportsScreen> {
   String? _selectedProjectId; // null = All Projects
-  String _reportType = 'overview'; // overview | pipeline | team | detailed
+  _TimelineFilter _timeline = _TimelineFilter.all;
 
-  static const _reportTypes = [
-    ('overview', 'Overview', Icons.dashboard_outlined),
-    ('pipeline', 'Pipeline', Icons.trending_up_rounded),
-    ('team', 'Team Performance', Icons.group_outlined),
-    ('detailed', 'Detailed Leads', Icons.list_alt_outlined),
-  ];
+  List<Lead> _filterLeads(List<Lead> leads) {
+    final from = _timeline.fromDate;
+    if (from == null) return leads;
+    return leads.where((l) => l.createdAt.isAfter(from)).toList();
+  }
 
-  void _generateReport(BuildContext context, AppState state) {
-    final projects = _selectedProjectId == null
-        ? state.projects
-        : state.projects.where((p) => p.id == _selectedProjectId).toList();
-
-    if (projects.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('No projects available for report', style: GoogleFonts.inter(fontSize: 12)),
-        backgroundColor: AppColors.peach,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      ));
-      return;
-    }
-
-    showDialog(
-      context: context,
-      barrierDismissible: true,
-      builder: (ctx) => _ReportDialog(
-        state: state,
-        projects: projects,
-        reportType: _reportType,
+  void _showReportSheet(BuildContext context, AppState state, RealEstateProject project) {
+    final allLeads = state.leads.where((l) => l.projectId == project.id).toList();
+    final leads = _filterLeads(allLeads);
+    final salesTeam = state.users.where((u) => project.assignedSalesIds.contains(u.id) || u.companyId == project.id && u.role == UserRole.sales).toSet().toList();
+    final allActivities = <LeadActivity>[];
+    for (final l in leads) { allActivities.addAll(l.activities); }
+    allActivities.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+    showModalBottomSheet(
+      context: context, isScrollControlled: true, backgroundColor: Colors.transparent,
+      builder: (_) => _MasterReportSheet(
+        project: project, leads: leads, salesTeam: salesTeam,
+        timeline: _timeline, allActivities: allActivities,
       ),
     );
   }
@@ -2228,257 +2252,257 @@ class _MasterReportsScreenState extends State<_MasterReportsScreen> {
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     final allProjects = state.projects;
-    // Determine which projects to display
     final displayProjects = _selectedProjectId == null
         ? allProjects
         : allProjects.where((p) => p.id == _selectedProjectId).toList();
 
     return SafeArea(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // ── Header ──
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Reports', style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                      Text('Project-wise analytics & performance', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted)),
-                    ],
-                  ),
-                ),
-                GradientButton(
-                  label: 'Generate Report',
-                  icon: Icons.file_download_outlined,
-                  height: 40,
-                  onTap: () => _generateReport(context, state),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Header ──
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+            child: Row(children: [
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Reports', style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                Text('Project-wise analytics & performance', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted)),
+              ])),
+            ]),
+          ),
+          const SizedBox(height: 16),
 
-            // ── Report Type Selector ──
-            Text('Report Type', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
-            const SizedBox(height: 8),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: _reportTypes.map((rt) {
-                  final sel = _reportType == rt.$1;
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: GestureDetector(
-                      onTap: () => setState(() => _reportType = rt.$1),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                        decoration: BoxDecoration(
-                          gradient: sel ? AppColors.gradientPrimary : null,
-                          color: sel ? null : AppColors.surface,
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: sel ? Colors.transparent : AppColors.border),
-                        ),
-                        child: Row(mainAxisSize: MainAxisSize.min, children: [
-                          Icon(rt.$3, size: 14, color: sel ? Colors.white : AppColors.textSecondary),
-                          const SizedBox(width: 6),
-                          Text(rt.$2, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: sel ? Colors.white : AppColors.textPrimary)),
+          // ── Filters Row ──
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              // Project dropdown
+              Text('Select Project', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+              const SizedBox(height: 6),
+              Container(
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: _selectedProjectId != null ? AppColors.lavender : AppColors.border, width: _selectedProjectId != null ? 1.5 : 1),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String?>(
+                    value: _selectedProjectId,
+                    isExpanded: true,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    borderRadius: BorderRadius.circular(12),
+                    hint: Text('All Projects', style: GoogleFonts.inter(fontSize: 13, color: AppColors.textMuted)),
+                    items: [
+                      DropdownMenuItem<String?>(
+                        value: null,
+                        child: Row(children: [
+                          Container(width: 24, height: 24, decoration: BoxDecoration(color: AppColors.lavender.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(6)),
+                            child: const Icon(Icons.apps_rounded, size: 14, color: AppColors.lavender)),
+                          const SizedBox(width: 10),
+                          Text('All Projects', style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
                         ]),
                       ),
-                    ),
-                  );
-                }).toList(),
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            // ── Project Filter ──
-            Text('Filter by Project', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
-            const SizedBox(height: 8),
-            Container(
-              decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: AppColors.border),
-              ),
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<String?>(
-                  value: _selectedProjectId,
-                  isExpanded: true,
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  borderRadius: BorderRadius.circular(14),
-                  hint: Text('All Projects', style: GoogleFonts.inter(fontSize: 13, color: AppColors.textMuted)),
-                  items: [
-                    DropdownMenuItem<String?>(
-                      value: null,
-                      child: Text('All Projects', style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-                    ),
-                    ...allProjects.map((p) => DropdownMenuItem<String?>(
-                      value: p.id,
-                      child: Text(p.name, style: GoogleFonts.inter(fontSize: 13, color: AppColors.textPrimary), overflow: TextOverflow.ellipsis),
-                    )),
-                  ],
-                  onChanged: (v) => setState(() => _selectedProjectId = v),
+                      ...allProjects.map((p) => DropdownMenuItem<String?>(
+                        value: p.id,
+                        child: Row(children: [
+                          Container(width: 24, height: 24,
+                            decoration: BoxDecoration(gradient: AppColors.gradientPrimary, borderRadius: BorderRadius.circular(6)),
+                            child: Center(child: Text(p.name[0].toUpperCase(), style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white)))),
+                          const SizedBox(width: 10),
+                          Expanded(child: Text(p.name, style: GoogleFonts.inter(fontSize: 13, color: AppColors.textPrimary), overflow: TextOverflow.ellipsis)),
+                        ]),
+                      )),
+                    ],
+                    onChanged: (v) => setState(() => _selectedProjectId = v),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 20),
-
-            // ── Global Stats (when All Projects selected) ──
-            if (_selectedProjectId == null && allProjects.isNotEmpty) ...[
-              _buildGlobalSummary(state),
-              const SizedBox(height: 20),
-            ],
-
-            // ── Per-Project Cards ──
-            Text(
-              _selectedProjectId == null ? 'All Projects (${allProjects.length})' : 'Project Report',
-              style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
-            ),
-            const SizedBox(height: 12),
-            if (displayProjects.isEmpty)
-              Center(
-                child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(Icons.bar_chart_rounded, size: 48, color: AppColors.textMuted.withValues(alpha: 0.4)),
-                  const SizedBox(height: 12),
-                  Text('No projects yet. Use the Projects tab to create your first project.', style: GoogleFonts.inter(color: AppColors.textMuted)),
-                ]),
-              )
-            else
-              ...displayProjects.map((project) {
-                // Users linked to this project (via companyId = project.id)
-                final projectUsers = state.users.where((u) => u.companyId == project.id && u.isApproved).toList();
-                final projectLeads = state.leads.where((l) => l.projectId == project.id).toList();
-                final closedLeads = projectLeads.where((l) => l.status == LeadStatus.closed).length;
-                final siteVisits = projectLeads.where((l) => l.status == LeadStatus.siteVisit).length;
-                final newLeads = projectLeads.where((l) => l.status == LeadStatus.newLead).length;
-                final convRate = projectLeads.isEmpty ? 0.0 : (closedLeads / projectLeads.length) * 100;
-                final salesTeam = projectUsers.where((u) => u.role == UserRole.sales).length;
-                final adminUser = projectUsers.where((u) => u.role == UserRole.companyAdmin).firstOrNull;
-
-                return GestureDetector(
-                  onTap: () => setState(() => _selectedProjectId = project.id),
-                  child: Container(
-                  margin: const EdgeInsets.only(bottom: 16),
-                  decoration: BoxDecoration(
-                    color: AppColors.surface,
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(
-                      color: _selectedProjectId == project.id ? AppColors.lavender : AppColors.border,
-                      width: _selectedProjectId == project.id ? 2 : 1,
-                    ),
-                    boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 10, offset: const Offset(0, 2))],
-                  ),
-                  child: Column(
-                    children: [
-                      // Header
-                      Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 46, height: 46,
-                              decoration: BoxDecoration(gradient: AppColors.gradientPrimary, borderRadius: BorderRadius.circular(13)),
-                              child: Center(child: Text(project.name.isNotEmpty ? project.name[0].toUpperCase() : 'P',
-                                  style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w700, color: Colors.white))),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(project.name, style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                                  Text(project.location, style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted)),
-                                  if (adminUser != null) ...[
-                                    const SizedBox(height: 2),
-                                    Row(children: [
-                                      const Icon(Icons.person_outline_rounded, size: 11, color: AppColors.lavender),
-                                      const SizedBox(width: 4),
-                                      Text('Admin: ${adminUser.name}', style: GoogleFonts.inter(fontSize: 10, color: AppColors.lavender)),
-                                    ]),
-                                  ],
-                                ],
-                              ),
-                            ),
-                            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                              StatusPill(label: project.status.label, color: project.status.color, isSmall: true),
-                              const SizedBox(height: 4),
-                              GestureDetector(
-                                onTap: () {
-                                  setState(() => _selectedProjectId = project.id);
-                                  _generateReport(context, state);
-                                },
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                  decoration: BoxDecoration(gradient: AppColors.gradientPrimary, borderRadius: BorderRadius.circular(8)),
-                                  child: Row(mainAxisSize: MainAxisSize.min, children: [
-                                    const Icon(Icons.file_download_outlined, size: 11, color: Colors.white),
-                                    const SizedBox(width: 4),
-                                    Text('Report', style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white)),
-                                  ]),
-                                ),
-                              ),
-                            ]),
-                          ],
+              const SizedBox(height: 12),
+              // Timeline filter
+              Text('Timeline', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+              const SizedBox(height: 6),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: _TimelineFilter.values.map((t) {
+                    final sel = _timeline == t;
+                    return Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: GestureDetector(
+                        onTap: () => setState(() => _timeline = t),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          decoration: BoxDecoration(
+                            gradient: sel ? AppColors.gradientPrimary : null,
+                            color: sel ? null : AppColors.surface,
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(color: sel ? Colors.transparent : AppColors.border),
+                          ),
+                          child: Text(t.label, style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600,
+                              color: sel ? Colors.white : AppColors.textSecondary)),
                         ),
                       ),
-                      // Stats grid
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    );
+                  }).toList(),
+                ),
+              ),
+            ]),
+          ),
+          const SizedBox(height: 16),
+
+          // ── Content ──
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Global summary when All Projects
+                  if (_selectedProjectId == null && allProjects.isNotEmpty) ...[
+                    _buildGlobalSummary(state),
+                    const SizedBox(height: 20),
+                  ],
+
+                  // Per-project cards
+                  Text(
+                    _selectedProjectId == null ? 'All Projects (${allProjects.length})' : 'Project Details',
+                    style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+                  ),
+                  const SizedBox(height: 12),
+                  if (displayProjects.isEmpty)
+                    Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(40),
+                        child: Column(mainAxisSize: MainAxisSize.min, children: [
+                          Icon(Icons.bar_chart_rounded, size: 48, color: AppColors.textMuted.withValues(alpha: 0.4)),
+                          const SizedBox(height: 12),
+                          Text('No projects yet.', style: GoogleFonts.inter(color: AppColors.textMuted)),
+                        ]),
+                      ),
+                    )
+                  else
+                    ...displayProjects.map((project) {
+                      final projectUsers = state.users.where((u) => u.companyId == project.id && u.isApproved).toList();
+                      final allProjectLeads = state.leads.where((l) => l.projectId == project.id).toList();
+                      final projectLeads = _filterLeads(allProjectLeads);
+                      final closedLeads = projectLeads.where((l) => l.status == LeadStatus.closed).length;
+                      final siteVisits = projectLeads.where((l) => l.status == LeadStatus.siteVisit).length;
+                      final newLeads = projectLeads.where((l) => l.status == LeadStatus.newLead).length;
+                      final convRate = projectLeads.isEmpty ? 0.0 : (closedLeads / projectLeads.length) * 100;
+                      final salesTeamCount = projectUsers.where((u) => u.role == UserRole.sales).length;
+                      final adminUser = projectUsers.where((u) => u.role == UserRole.companyAdmin).firstOrNull;
+
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 16),
                         decoration: BoxDecoration(
-                          color: AppColors.background,
-                          borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(18), bottomRight: Radius.circular(18)),
+                          color: AppColors.surface,
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(
+                            color: _selectedProjectId == project.id ? AppColors.lavender : AppColors.border,
+                            width: _selectedProjectId == project.id ? 2 : 1,
+                          ),
+                          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 10, offset: const Offset(0, 2))],
                         ),
                         child: Column(
                           children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceAround,
-                              children: [
-                                _reportStat('Sales Team', '$salesTeam', AppColors.gradientTertiary),
-                                _vDivider(),
-                                _reportStat('Total Leads', '${projectLeads.length}', AppColors.gradientSecondary),
-                                _vDivider(),
-                                _reportStat('Closures', '$closedLeads', AppColors.gradientSuccess),
-                                _vDivider(),
-                                _reportStat('Conv.', '${convRate.toStringAsFixed(0)}%', AppColors.gradientCTA),
-                              ],
-                            ),
-                            const SizedBox(height: 10),
-                            // Mini lead pipeline
-                            if (projectLeads.isNotEmpty) ...[
-                              const Divider(height: 1),
-                              const SizedBox(height: 8),
-                              Row(
+                            // Project header
+                            Padding(
+                              padding: const EdgeInsets.all(16),
+                              child: Row(
                                 children: [
-                                  Text('Pipeline: ', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted, fontWeight: FontWeight.w600)),
-                                  const SizedBox(width: 4),
-                                  _pipelinePill('New $newLeads', LeadStatus.newLead.color),
-                                  const SizedBox(width: 4),
-                                  _pipelinePill('Visit $siteVisits', LeadStatus.siteVisit.color),
-                                  const SizedBox(width: 4),
-                                  _pipelinePill('Closed $closedLeads', LeadStatus.closed.color),
+                                  Container(
+                                    width: 46, height: 46,
+                                    decoration: BoxDecoration(gradient: AppColors.gradientPrimary, borderRadius: BorderRadius.circular(13)),
+                                    child: Center(child: Text(project.name.isNotEmpty ? project.name[0].toUpperCase() : 'P',
+                                        style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w700, color: Colors.white))),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(project.name, style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                                        Text(project.location, style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted)),
+                                        if (adminUser != null) Row(children: [
+                                          const Icon(Icons.person_outline_rounded, size: 11, color: AppColors.lavender),
+                                          const SizedBox(width: 4),
+                                          Text('Admin: ${adminUser.name}', style: GoogleFonts.inter(fontSize: 10, color: AppColors.lavender)),
+                                        ]),
+                                      ],
+                                    ),
+                                  ),
+                                  Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                                    StatusPill(label: project.status.label, color: project.status.color, isSmall: true),
+                                    const SizedBox(height: 6),
+                                    GestureDetector(
+                                      onTap: () => _showReportSheet(context, state, project),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                        decoration: BoxDecoration(gradient: AppColors.gradientPrimary, borderRadius: BorderRadius.circular(10)),
+                                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                                          const Icon(Icons.picture_as_pdf_rounded, size: 12, color: Colors.white),
+                                          const SizedBox(width: 5),
+                                          Text('Report', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white)),
+                                        ]),
+                                      ),
+                                    ),
+                                  ]),
                                 ],
                               ),
-                            ],
+                            ),
+                            // Stats bottom
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                              decoration: BoxDecoration(
+                                color: AppColors.background,
+                                borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(18), bottomRight: Radius.circular(18)),
+                              ),
+                              child: Column(children: [
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                                  children: [
+                                    _reportStat('Sales Team', '$salesTeamCount', AppColors.gradientTertiary),
+                                    _vDivider(),
+                                    _reportStat('Total Leads', '${projectLeads.length}', AppColors.gradientSecondary),
+                                    _vDivider(),
+                                    _reportStat('Closures', '$closedLeads', AppColors.gradientSuccess),
+                                    _vDivider(),
+                                    _reportStat('Conv.', '${convRate.toStringAsFixed(0)}%', AppColors.gradientCTA),
+                                  ],
+                                ),
+                                if (projectLeads.isNotEmpty) ...[
+                                  const SizedBox(height: 10),
+                                  const Divider(height: 1),
+                                  const SizedBox(height: 8),
+                                  Row(children: [
+                                    Text('Pipeline: ', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted, fontWeight: FontWeight.w600)),
+                                    const SizedBox(width: 4),
+                                    _pipelinePill('New $newLeads', LeadStatus.newLead.color),
+                                    const SizedBox(width: 4),
+                                    _pipelinePill('Visit $siteVisits', LeadStatus.siteVisit.color),
+                                    const SizedBox(width: 4),
+                                    _pipelinePill('Closed $closedLeads', LeadStatus.closed.color),
+                                  ]),
+                                ],
+                              ]),
+                            ),
                           ],
                         ),
-                      ),
-                    ],
-                  ),
-                  ),
-                );
-              }),
-          ],
-        ),
+                      );
+                    }),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 
   Widget _buildGlobalSummary(AppState state) {
-    final totalLeads = state.leads.length;
-    final totalClosed = state.leads.where((l) => l.status == LeadStatus.closed).length;
+    final leads = _filterLeads(state.leads.toList());
+    final totalLeads = leads.length;
+    final totalClosed = leads.where((l) => l.status == LeadStatus.closed).length;
     final convRate = totalLeads == 0 ? 0.0 : (totalClosed / totalLeads) * 100;
     final totalSales = state.users.where((u) => u.role == UserRole.sales && u.isApproved).length;
 
@@ -2496,20 +2520,28 @@ class _MasterReportsScreenState extends State<_MasterReportsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Platform Summary', style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+          Row(children: [
+            Text('Platform Summary', style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(color: AppColors.lavender.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(8)),
+              child: Text(_timeline.label, style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w600, color: AppColors.lavender)),
+            ),
+          ]),
           const SizedBox(height: 12),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
               _summaryKpi('Projects', '${state.projects.length}', AppColors.gradientPrimary),
               _vDivider(),
-              _summaryKpi('Total Leads', '$totalLeads', AppColors.gradientSecondary),
+              _summaryKpi('Leads', '$totalLeads', AppColors.gradientSecondary),
               _vDivider(),
-              _summaryKpi('Closures', '$totalClosed', AppColors.gradientSuccess),
+              _summaryKpi('Closed', '$totalClosed', AppColors.gradientSuccess),
               _vDivider(),
               _summaryKpi('Conv.%', '${convRate.toStringAsFixed(0)}%', AppColors.gradientCTA),
               _vDivider(),
-              _summaryKpi('Sales Team', '$totalSales', AppColors.gradientTertiary),
+              _summaryKpi('Sales', '$totalSales', AppColors.gradientTertiary),
             ],
           ),
         ],
@@ -2553,389 +2585,261 @@ class _MasterReportsScreenState extends State<_MasterReportsScreen> {
 
 }
 
-// ─── Report Dialog ────────────────────────────────────────────────────────────
-class _ReportDialog extends StatelessWidget {
-  final AppState state;
-  final List<RealEstateProject> projects;
-  final String reportType;
+// ─── Master Report Sheet (matches project admin PDF format) ──────────────────
+class _MasterReportSheet extends StatelessWidget {
+  final RealEstateProject project;
+  final List<Lead> leads;
+  final List<AppUser> salesTeam;
+  final _TimelineFilter timeline;
+  final List<LeadActivity> allActivities;
 
-  const _ReportDialog({required this.state, required this.projects, required this.reportType});
-
-  String get _reportTitle {
-    switch (reportType) {
-      case 'pipeline': return 'Pipeline Report';
-      case 'team': return 'Team Performance Report';
-      case 'detailed': return 'Detailed Leads Report';
-      default: return 'Overview Report';
-    }
-  }
+  const _MasterReportSheet({
+    required this.project,
+    required this.leads,
+    required this.salesTeam,
+    required this.timeline,
+    required this.allActivities,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final generatedAt = DateTime.now();
-    final dateStr = '${generatedAt.day}/${generatedAt.month}/${generatedAt.year} '
-        '${generatedAt.hour.toString().padLeft(2, '0')}:${generatedAt.minute.toString().padLeft(2, '0')}';
-
-    return Dialog(
-      backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.all(16),
-      child: Container(
-        constraints: const BoxConstraints(maxWidth: 600, maxHeight: 700),
-        decoration: BoxDecoration(
-          color: AppColors.background,
-          borderRadius: BorderRadius.circular(24),
-          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 30, offset: const Offset(0, 10))],
-        ),
-        child: Column(
-          children: [
-            // Header
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                gradient: AppColors.gradientPrimary,
-                borderRadius: const BorderRadius.only(topLeft: Radius.circular(24), topRight: Radius.circular(24)),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 40, height: 40,
-                    decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(12)),
-                    child: const Icon(Icons.bar_chart_rounded, color: Colors.white, size: 20),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(_reportTitle, style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white)),
-                        Text('Generated $dateStr · ${projects.length} project(s)',
-                            style: GoogleFonts.inter(fontSize: 11, color: Colors.white.withValues(alpha: 0.8))),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.close_rounded, color: Colors.white),
-                  ),
-                ],
-              ),
-            ),
-            // Content
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    ...projects.map((project) => _buildProjectSection(project)),
-                  ],
-                ),
-              ),
-            ),
-            // Footer
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(24), bottomRight: Radius.circular(24)),
-                border: Border(top: BorderSide(color: AppColors.border)),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.info_outline_rounded, size: 14, color: AppColors.textMuted),
-                  const SizedBox(width: 8),
-                  Expanded(child: Text('Report generated on $dateStr. Data reflects current CRM state.', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted))),
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: Text('Close', style: GoogleFonts.inter(fontWeight: FontWeight.w600, color: AppColors.lavender)),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildProjectSection(RealEstateProject project) {
-    final projectLeads = state.leads.where((l) => l.projectId == project.id).toList();
-    final closedLeads = projectLeads.where((l) => l.status == LeadStatus.closed).length;
-    final siteVisits = projectLeads.where((l) => l.status == LeadStatus.siteVisit).length;
-    final newLeads = projectLeads.where((l) => l.status == LeadStatus.newLead).length;
-    final qualified = projectLeads.where((l) => l.status == LeadStatus.contacted).length;
-    final negotiation = projectLeads.where((l) => l.status == LeadStatus.negotiation).length;
-    final notInterested = projectLeads.where((l) => l.status == LeadStatus.lost).length;
-    final convRate = projectLeads.isEmpty ? 0.0 : (closedLeads / projectLeads.length) * 100;
-    final projectUsers = state.users.where((u) => u.companyId == project.id && u.isApproved).toList();
-    final salesTeam = projectUsers.where((u) => u.role == UserRole.sales).toList();
-    final adminUser = projectUsers.where((u) => u.role == UserRole.companyAdmin).firstOrNull;
+    final closedLeads = leads.where((l) => l.status == LeadStatus.closed).length;
+    final siteVisits = leads.where((l) => l.status == LeadStatus.siteVisit).length;
+    final convRate = leads.isEmpty ? 0.0 : (closedLeads / leads.length) * 100;
+    final now = DateTime.now();
+    final dateStr = '${now.day}/${now.month}/${now.year}';
+    final timeStr = '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 20),
+      margin: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.border),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.12), blurRadius: 24, offset: const Offset(0, -4))],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Project header
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(colors: [AppColors.lavender.withValues(alpha: 0.12), AppColors.sky.withValues(alpha: 0.08)]),
-              borderRadius: const BorderRadius.only(topLeft: Radius.circular(16), topRight: Radius.circular(16)),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 40, height: 40,
-                  decoration: BoxDecoration(gradient: AppColors.gradientPrimary, borderRadius: BorderRadius.circular(12)),
-                  child: Center(child: Text(project.name[0].toUpperCase(), style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white))),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(project.name, style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                      Text('${project.location} · ${project.developerName}', style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted)),
-                      if (adminUser != null)
-                        Text('Admin: ${adminUser.name}', style: GoogleFonts.inter(fontSize: 10, color: AppColors.lavender)),
-                    ],
-                  ),
-                ),
-                Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                  StatusPill(label: project.status.label, color: project.status.color, isSmall: true),
-                  const SizedBox(height: 4),
-                  Text('${salesTeam.length} sales', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
-                ]),
-              ],
-            ),
-          ),
-          // Report body based on type
-          Padding(
-            padding: const EdgeInsets.all(14),
-            child: _buildReportBody(
-              projectLeads: projectLeads,
-              closedLeads: closedLeads,
-              siteVisits: siteVisits,
-              newLeads: newLeads,
-              qualified: qualified,
-              negotiation: negotiation,
-              notInterested: notInterested,
-              convRate: convRate,
-              salesTeam: salesTeam,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildReportBody({
-    required List<Lead> projectLeads,
-    required int closedLeads,
-    required int siteVisits,
-    required int newLeads,
-    required int qualified,
-    required int negotiation,
-    required int notInterested,
-    required double convRate,
-    required List<AppUser> salesTeam,
-  }) {
-    switch (reportType) {
-      case 'pipeline':
-        return _buildPipelineReport(projectLeads, newLeads, qualified, siteVisits, negotiation, closedLeads, notInterested);
-      case 'team':
-        return _buildTeamReport(salesTeam, projectLeads);
-      case 'detailed':
-        return _buildDetailedLeadReport(projectLeads);
-      default:
-        return _buildOverviewReport(projectLeads, closedLeads, siteVisits, newLeads, convRate, salesTeam.length);
-    }
-  }
-
-  Widget _buildOverviewReport(List<Lead> leads, int closed, int visits, int newL, double conv, int teamSize) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: [
-            _rStat('Total', '${leads.length}', AppColors.lavender),
-            _rStat('New', '$newL', AppColors.sky),
-            _rStat('Visits', '$visits', AppColors.peach),
-            _rStat('Closed', '$closed', AppColors.mint),
-            _rStat('Conv%', '${conv.toStringAsFixed(0)}%', const Color(0xFF5B3FBF)),
-          ],
-        ),
-        const SizedBox(height: 12),
-        if (leads.isNotEmpty) ...[
-          const Divider(height: 1),
-          const SizedBox(height: 10),
-          Text('Lead Sources', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
-          const SizedBox(height: 6),
-          ...LeadSource.values.map((src) {
-            final cnt = leads.where((l) => l.source == src).length;
-            if (cnt == 0) return const SizedBox.shrink();
-            final pct = (cnt / leads.length * 100).toStringAsFixed(0);
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: Row(children: [
-                Expanded(flex: 3, child: Text(src.label, style: GoogleFonts.inter(fontSize: 11, color: AppColors.textSecondary))),
-                Expanded(flex: 5, child: ClipRRect(
-                  borderRadius: BorderRadius.circular(4),
-                  child: LinearProgressIndicator(
-                    value: cnt / leads.length,
-                    backgroundColor: AppColors.border,
-                    valueColor: AlwaysStoppedAnimation(_sourceColor(src)),
-                    minHeight: 6,
-                  ),
-                )),
-                const SizedBox(width: 8),
-                SizedBox(width: 36, child: Text('$cnt ($pct%)', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted))),
-              ]),
-            );
-          }),
-        ],
-      ],
-    );
-  }
-
-  Color _sourceColor(LeadSource src) {
-    const colors = [
-      Color(0xFFC9B8FF), Color(0xFFB8FFE4), Color(0xFFB8EEFF),
-      Color(0xFFFFD4A8), Color(0xFFFFB8D9), Color(0xFFC9B8FF),
-      Color(0xFFFFD4A8), Color(0xFFE0E0E8),
-    ];
-    final idx = LeadSource.values.indexOf(src);
-    return idx >= 0 && idx < colors.length ? colors[idx] : AppColors.lavender;
-  }
-
-  Widget _buildPipelineReport(List<Lead> leads, int newL, int qual, int visits, int neg, int closed, int notInt) {
-    final stages = [
-      ('New Lead', newL, LeadStatus.newLead.color),
-      ('Contacted', qual, LeadStatus.contacted.color),
-      ('Site Visit', visits, LeadStatus.siteVisit.color),
-      ('Negotiation', neg, LeadStatus.negotiation.color),
-      ('Closed', closed, LeadStatus.closed.color),
-      ('Lost', notInt, LeadStatus.lost.color),
-    ];
-    if (leads.isEmpty) {
-      return Text('No leads in this project yet.', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted));
-    }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Lead Pipeline Breakdown', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
-        const SizedBox(height: 8),
-        ...stages.map((s) {
-          if (s.$2 == 0) return const SizedBox.shrink();
-          final pct = (s.$2 / leads.length * 100).toStringAsFixed(0);
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 6),
-            child: Row(children: [
-              Container(width: 10, height: 10, margin: const EdgeInsets.only(right: 8), decoration: BoxDecoration(shape: BoxShape.circle, color: s.$3)),
-              Expanded(flex: 3, child: Text(s.$1, style: GoogleFonts.inter(fontSize: 11, color: AppColors.textPrimary))),
-              Expanded(flex: 5, child: ClipRRect(
-                borderRadius: BorderRadius.circular(4),
-                child: LinearProgressIndicator(
-                  value: s.$2 / leads.length,
-                  backgroundColor: AppColors.border,
-                  valueColor: AlwaysStoppedAnimation(s.$3),
-                  minHeight: 8,
-                ),
-              )),
-              const SizedBox(width: 8),
-              SizedBox(width: 44, child: Text('${s.$2} ($pct%)', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted))),
-            ]),
-          );
-        }),
-      ],
-    );
-  }
-
-  Widget _buildTeamReport(List<AppUser> salesTeam, List<Lead> projectLeads) {
-    if (salesTeam.isEmpty) {
-      return Text('No sales team members assigned to this project.', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted));
-    }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Sales Team Performance', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
-        const SizedBox(height: 8),
-        ...salesTeam.map((u) {
-          final uLeads = projectLeads.where((l) => l.assignedToId == u.id).length;
-          final uClosed = projectLeads.where((l) => l.assignedToId == u.id && l.status == LeadStatus.closed).length;
-          final uConv = uLeads == 0 ? 0.0 : uClosed / uLeads * 100;
-          return Container(
-            margin: const EdgeInsets.only(bottom: 8),
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.border)),
-            child: Row(children: [
-              AvatarWidget(initials: u.initials, size: 34, gradient: AppColors.gradientTertiary),
-              const SizedBox(width: 10),
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(u.name, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-                Text(u.email, style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
-              ])),
-              Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                Text('$uLeads leads', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-                Text('$uClosed closed · ${uConv.toStringAsFixed(0)}%', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
-              ]),
-            ]),
-          );
-        }),
-      ],
-    );
-  }
-
-  Widget _buildDetailedLeadReport(List<Lead> projectLeads) {
-    if (projectLeads.isEmpty) {
-      return Text('No leads in this project yet.', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted));
-    }
-    final sorted = List<Lead>.from(projectLeads)..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('${sorted.length} Leads (latest first)', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
-        const SizedBox(height: 8),
-        ...sorted.take(20).map((lead) => Container(
-          margin: const EdgeInsets.only(bottom: 6),
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.border)),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        // Drag handle
+        Center(child: Container(margin: const EdgeInsets.only(top: 10, bottom: 6), width: 36, height: 4,
+          decoration: BoxDecoration(color: AppColors.border, borderRadius: BorderRadius.circular(2)))),
+        // Sheet top bar
+        Padding(padding: const EdgeInsets.fromLTRB(20, 4, 12, 0),
           child: Row(children: [
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(lead.name, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-              Text('${lead.phone} · ${lead.source.label}', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
-            ])),
-            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-              StatusPill(label: lead.status.label, color: lead.status.color, isSmall: true),
-              const SizedBox(height: 2),
-              Text(lead.budgetDisplay, style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
+            Text('Report Preview', style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(color: AppColors.lavender.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(8)),
+              child: Text(timeline.label, style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w600, color: AppColors.lavender)),
+            ),
+            const Spacer(),
+            IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close_rounded, color: AppColors.textMuted)),
+          ])),
+        const Divider(height: 1),
+
+        // Scrollable content
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              // ── RLA Header ──
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                decoration: BoxDecoration(gradient: AppColors.gradientPrimary, borderRadius: BorderRadius.circular(14)),
+                child: Row(children: [
+                  Container(width: 44, height: 44,
+                    decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(11)),
+                    child: Center(child: Text('R', style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.w900, color: Colors.white)))),
+                  const SizedBox(width: 14),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('RLA CRM', style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w800, color: Colors.white, letterSpacing: 1.0)),
+                    Text('Real Estate · Leads · Growth', style: GoogleFonts.inter(fontSize: 10, color: Colors.white.withValues(alpha: 0.8))),
+                  ])),
+                  Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                    Text('PROJECT REPORT', style: GoogleFonts.inter(fontSize: 9, fontWeight: FontWeight.w700, color: Colors.white.withValues(alpha: 0.8), letterSpacing: 1.2)),
+                    Text('$dateStr · $timeStr', style: GoogleFonts.inter(fontSize: 9, color: Colors.white.withValues(alpha: 0.7))),
+                    Text(timeline.label, style: GoogleFonts.inter(fontSize: 9, color: Colors.white.withValues(alpha: 0.7))),
+                  ]),
+                ]),
+              ),
+              const SizedBox(height: 20),
+
+              // ── Project Information ──
+              _sectionTitle('Project Information'),
+              const SizedBox(height: 10),
+              _infoRow('Project Name', project.name),
+              _infoRow('Location', project.location),
+              if (project.developerName.isNotEmpty) _infoRow('Developer', project.developerName),
+              if (project.reraNumber != null && project.reraNumber!.isNotEmpty) _infoRow('RERA No.', project.reraNumber!),
+              _infoRow('Property Type', project.propertyType.label),
+              _infoRow('Status', project.status.label),
+              if (project.priceDisplay.isNotEmpty) _infoRow('Price Range', project.priceDisplay),
+              const SizedBox(height: 16),
+
+              // ── Performance Summary ──
+              _sectionTitle('Performance Summary'),
+              const SizedBox(height: 10),
+              Row(children: [
+                Expanded(child: _kpiBox('Total', '${leads.length}', AppColors.lavender)),
+                const SizedBox(width: 8),
+                Expanded(child: _kpiBox('Visits', '$siteVisits', AppColors.sky)),
+                const SizedBox(width: 8),
+                Expanded(child: _kpiBox('Closed', '$closedLeads', AppColors.mint)),
+                const SizedBox(width: 8),
+                Expanded(child: _kpiBox('Conv.%', '${convRate.toStringAsFixed(1)}%', AppColors.peach)),
+              ]),
+              const SizedBox(height: 16),
+
+              // ── Lead Status Breakdown ──
+              _sectionTitle('Lead Status Breakdown'),
+              const SizedBox(height: 10),
+              ...LeadStatus.values.map((s) {
+                final cnt = leads.where((l) => l.status == s).length;
+                return Padding(padding: const EdgeInsets.only(bottom: 6), child: Row(children: [
+                  Container(width: 8, height: 8, decoration: BoxDecoration(color: s.color, shape: BoxShape.circle)),
+                  const SizedBox(width: 8),
+                  SizedBox(width: 90, child: Text(s.label, style: GoogleFonts.inter(fontSize: 12, color: AppColors.textSecondary))),
+                  Expanded(child: Stack(children: [
+                    Container(height: 6, decoration: BoxDecoration(color: AppColors.border, borderRadius: BorderRadius.circular(3))),
+                    FractionallySizedBox(
+                      widthFactor: leads.isEmpty ? 0.0 : (cnt / leads.length).clamp(0.0, 1.0),
+                      child: Container(height: 6, decoration: BoxDecoration(color: s.color, borderRadius: BorderRadius.circular(3)))),
+                  ])),
+                  const SizedBox(width: 8),
+                  Text('$cnt', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                ]));
+              }),
+              const SizedBox(height: 16),
+
+              // ── Sales Team Performance ──
+              _sectionTitle('Sales Team Performance'),
+              const SizedBox(height: 10),
+              if (salesTeam.isEmpty)
+                Text('No sales team assigned.', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted))
+              else
+                ...salesTeam.map((u) {
+                  final uLeads = leads.where((l) => l.assignedToId == u.id).length;
+                  final uClosed = leads.where((l) => l.assignedToId == u.id && l.status == LeadStatus.closed).length;
+                  final uVisits = leads.where((l) => l.assignedToId == u.id && l.status == LeadStatus.siteVisit).length;
+                  return Container(margin: const EdgeInsets.only(bottom: 8), padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.border)),
+                    child: Row(children: [
+                      AvatarWidget(initials: u.initials, size: 32, gradient: AppColors.gradientTertiary),
+                      const SizedBox(width: 10),
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(u.name, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                        Text(u.email, style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
+                      ])),
+                      Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                        Text('$uLeads leads · $uClosed closed', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                        Text('$uVisits visits', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
+                      ]),
+                    ]),
+                  );
+                }),
+              const SizedBox(height: 16),
+
+              // ── All Leads ──
+              _sectionTitle('All Leads (${leads.length})'),
+              const SizedBox(height: 10),
+              if (leads.isEmpty)
+                Text('No leads in this period.', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted))
+              else
+                ...leads.map((lead) => Container(margin: const EdgeInsets.only(bottom: 8), padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.border)),
+                  child: Row(children: [
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(lead.name, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                      Text('${lead.phone}${lead.email.isNotEmpty ? " · ${lead.email}" : ""}', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
+                      Text('Assigned: ${lead.assignedToName} · ${_fmtDate(lead.createdAt)}', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
+                      Text('Source: ${lead.source.label}', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
+                    ])),
+                    StatusPill(label: lead.status.label, color: lead.status.color, isSmall: true),
+                  ]),
+                )),
+              const SizedBox(height: 16),
+
+              // ── Sales Activity Log ──
+              _sectionTitle('Sales Activity Log (${allActivities.length})'),
+              const SizedBox(height: 10),
+              if (allActivities.isEmpty)
+                Text('No activity recorded.', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted))
+              else
+                ...allActivities.take(100).toList().asMap().entries.map((entry) {
+                  final act = entry.value;
+                  String leadName = '';
+                  try { leadName = leads.firstWhere((l) => l.id == act.leadId).name; } catch (_) {}
+                  return Container(margin: const EdgeInsets.only(bottom: 6), padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.border)),
+                    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Container(width: 6, height: 6, margin: const EdgeInsets.only(top: 5), decoration: BoxDecoration(color: AppColors.lavender, shape: BoxShape.circle)),
+                      const SizedBox(width: 8),
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(act.action, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                        if (leadName.isNotEmpty) Text('Lead: $leadName', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textSecondary)),
+                        Text('By: ${act.userName}', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
+                        if (act.note != null && act.note!.isNotEmpty)
+                          Text('Note: ${act.note}', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted, fontStyle: FontStyle.italic)),
+                      ])),
+                      Text(_fmtDateTime(act.timestamp), style: GoogleFonts.inter(fontSize: 9, color: AppColors.textMuted)),
+                    ]),
+                  );
+                }),
+              const SizedBox(height: 24),
+
+              // ── P&C Footer ──
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.border)),
+                child: Column(children: [
+                  const Divider(height: 1),
+                  const SizedBox(height: 8),
+                  Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                    const Icon(Icons.lock_outline_rounded, size: 12, color: AppColors.textMuted),
+                    const SizedBox(width: 6),
+                    Text('Private & Confidential', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.textMuted, letterSpacing: 0.5)),
+                    const SizedBox(width: 6),
+                    const Icon(Icons.lock_outline_rounded, size: 12, color: AppColors.textMuted),
+                  ]),
+                  const SizedBox(height: 4),
+                  Text('This report is intended solely for authorised personnel of RLA CRM.', style: GoogleFonts.inter(fontSize: 9, color: AppColors.textMuted.withValues(alpha: 0.7)), textAlign: TextAlign.center),
+                  Text('Unauthorised use, disclosure or distribution is strictly prohibited.', style: GoogleFonts.inter(fontSize: 9, color: AppColors.textMuted.withValues(alpha: 0.7)), textAlign: TextAlign.center),
+                  const SizedBox(height: 4),
+                  Text('Generated by RLA CRM · $dateStr', style: GoogleFonts.inter(fontSize: 9, color: AppColors.textMuted.withValues(alpha: 0.5))),
+                ]),
+              ),
+              const SizedBox(height: 16),
             ]),
-          ]),
-        )),
-        if (sorted.length > 20)
-          Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: Text('... and ${sorted.length - 20} more leads', style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted, fontStyle: FontStyle.italic)),
           ),
-      ],
+        ),
+      ]),
     );
   }
 
-  Widget _rStat(String label, String value, Color color) {
-    return Column(
-      children: [
-        Text(value, style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w800, color: color)),
-        Text(label, style: GoogleFonts.inter(fontSize: 9, color: AppColors.textMuted)),
-      ],
-    );
-  }
+  Widget _sectionTitle(String title) => Row(children: [
+    Container(width: 3, height: 16, decoration: BoxDecoration(gradient: AppColors.gradientPrimary, borderRadius: BorderRadius.circular(2))),
+    const SizedBox(width: 8),
+    Text(title, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+  ]);
+
+  Widget _infoRow(String label, String value) => Padding(padding: const EdgeInsets.only(bottom: 6),
+    child: Row(children: [
+      SizedBox(width: 100, child: Text(label, style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted))),
+      Expanded(child: Text(value, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary))),
+    ]));
+
+  Widget _kpiBox(String label, String value, Color color) => Container(
+    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+    decoration: BoxDecoration(color: color.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(10), border: Border.all(color: color.withValues(alpha: 0.3))),
+    child: Column(children: [
+      Text(value, style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+      Text(label, style: GoogleFonts.inter(fontSize: 9, color: AppColors.textMuted)),
+    ]),
+  );
+
+  String _fmtDate(DateTime dt) => '${dt.day}/${dt.month}/${dt.year}';
+  String _fmtDateTime(DateTime dt) => '${dt.day}/${dt.month}/${dt.year.toString().substring(2)} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
 }
 
 class _MasterAlertSheet extends StatefulWidget {

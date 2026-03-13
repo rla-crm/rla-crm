@@ -347,99 +347,39 @@ RLA CRM Platform
 
   Future<void> init() async {
     await Hive.initFlutter();
-    _usersBox      = await Hive.openBox('users_v8');
-    _leadsBox      = await Hive.openBox('leads_v8');
-    _notifBox      = await Hive.openBox('notifs_v8');
-    _projectsBox   = await Hive.openBox('projects_v8');
-    _approvalsBox  = await Hive.openBox('approvals_v8');
-    _emailLogsBox  = await Hive.openBox('email_logs_v8');
-    _settingsBox   = await Hive.openBox('settings_v8');
-
-    // Migrate existing data from older box versions
-    await _migrateFromOldBoxes();
+    // v9 — clean slate (no migration from older boxes; removes all test/demo users)
+    _usersBox      = await Hive.openBox('users_v9');
+    _leadsBox      = await Hive.openBox('leads_v9');
+    _notifBox      = await Hive.openBox('notifs_v9');
+    _projectsBox   = await Hive.openBox('projects_v9');
+    _approvalsBox  = await Hive.openBox('approvals_v9');
+    _emailLogsBox  = await Hive.openBox('email_logs_v9');
+    _settingsBox   = await Hive.openBox('settings_v9');
 
     _loadAll();
-    if (_users.isEmpty) _seedData();
+    // Enforce: only master admin exists in fresh install
+    _ensureOnlyMasterAdmin();
   }
 
-  /// Migrate data from v7 boxes to v8 boxes (removes company dependency)
-  Future<void> _migrateFromOldBoxes() async {
-    try {
-      // Try to migrate users from v7
-      final oldUsersBox = await Hive.openBox('users_v7');
-      if (oldUsersBox.isNotEmpty && _usersBox.isEmpty) {
-        for (final key in oldUsersBox.keys) {
-          try {
-            final v = oldUsersBox.get(key);
-            if (v != null) _usersBox.put(key, v);
-          } catch (_) {}
-        }
-      }
-      // Migrate leads
-      final oldLeadsBox = await Hive.openBox('leads_v7');
-      if (oldLeadsBox.isNotEmpty && _leadsBox.isEmpty) {
-        for (final key in oldLeadsBox.keys) {
-          try {
-            final v = oldLeadsBox.get(key);
-            if (v != null) _leadsBox.put(key, v);
-          } catch (_) {}
-        }
-      }
-      // Migrate projects
-      final oldProjectsBox = await Hive.openBox('projects_v7');
-      if (oldProjectsBox.isNotEmpty && _projectsBox.isEmpty) {
-        for (final key in oldProjectsBox.keys) {
-          try {
-            final v = oldProjectsBox.get(key);
-            if (v != null) _projectsBox.put(key, v);
-          } catch (_) {}
-        }
-      }
-      // Migrate notifications
-      final oldNotifBox = await Hive.openBox('notifs_v7');
-      if (oldNotifBox.isNotEmpty && _notifBox.isEmpty) {
-        for (final key in oldNotifBox.keys) {
-          try {
-            final v = oldNotifBox.get(key);
-            if (v != null) _notifBox.put(key, v);
-          } catch (_) {}
-        }
-      }
-      // Migrate approvals
-      final oldApprovalsBox = await Hive.openBox('approvals_v7');
-      if (oldApprovalsBox.isNotEmpty && _approvalsBox.isEmpty) {
-        for (final key in oldApprovalsBox.keys) {
-          try {
-            final v = oldApprovalsBox.get(key);
-            if (v != null) _approvalsBox.put(key, v);
-          } catch (_) {}
-        }
-      }
-      // Migrate email logs
-      final oldEmailLogsBox = await Hive.openBox('email_logs_v7');
-      if (oldEmailLogsBox.isNotEmpty && _emailLogsBox.isEmpty) {
-        for (final key in oldEmailLogsBox.keys) {
-          try {
-            final v = oldEmailLogsBox.get(key);
-            if (v != null) _emailLogsBox.put(key, v);
-          } catch (_) {}
-        }
-      }
-      // Migrate settings
-      final oldSettingsBox = await Hive.openBox('settings_v7');
-      if (oldSettingsBox.isNotEmpty) {
-        for (final key in oldSettingsBox.keys) {
-          try {
-            if (_settingsBox.get(key) == null) {
-              _settingsBox.put(key, oldSettingsBox.get(key));
-            }
-          } catch (_) {}
-        }
-      }
-    } catch (_) {
-      // Migration failed silently — fresh start
+  /// Wipes all non-master-admin users and re-seeds master admin if missing.
+  void _ensureOnlyMasterAdmin() {
+    // Remove any user that is NOT a master admin (clean slate)
+    final nonMasterKeys = _usersBox.keys.where((k) {
+      try {
+        final u = AppUser.fromMap(Map<String, dynamic>.from(jsonDecode(_usersBox.get(k))));
+        return u.role != UserRole.masterAdmin;
+      } catch (_) { return false; }
+    }).toList();
+    for (final k in nonMasterKeys) { _usersBox.delete(k); }
+
+    // Re-seed master admin if box is empty after cleanup
+    _loadAll();
+    if (_users.where((u) => u.role == UserRole.masterAdmin).isEmpty) {
+      _seedData();
     }
   }
+
+  // Migration removed in v9 — clean slate, no test data carried forward
 
   void _loadAll() {
     _users = _usersBox.values.map((v) => AppUser.fromMap(Map<String, dynamic>.from(jsonDecode(v)))).toList();
