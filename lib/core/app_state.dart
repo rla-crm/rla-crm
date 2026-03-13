@@ -53,9 +53,22 @@ class AppState extends ChangeNotifier {
   List<ApprovalRequest> get pendingApprovals =>
       _approvals.where((a) => a.status == ApprovalStatus.pending).toList();
 
-  /// Master admin sees all pending employee-signup requests (no company registration)
-  List<ApprovalRequest> get masterAdminPendingApprovals =>
-      pendingApprovals.where((a) => a.type == ApprovalType.employeeSignup).toList();
+  /// Master admin sees ONLY orphaned employee-signup requests
+  /// (i.e., requests for projects that have NO active project admin assigned).
+  /// Requests for projects WITH a project admin are handled by that admin.
+  List<ApprovalRequest> get masterAdminPendingApprovals {
+    return pendingApprovals.where((a) {
+      if (a.type != ApprovalType.employeeSignup) return false;
+      // Check if the project has an active admin
+      final hasProjectAdmin = _users.any((u) =>
+          u.companyId == a.companyId &&
+          u.role == UserRole.companyAdmin &&
+          u.isApproved &&
+          u.isActive);
+      // Show to master admin only if no project admin exists
+      return !hasProjectAdmin;
+    }).toList();
+  }
 
   List<ApprovalRequest> get companyPendingApprovals {
     if (!isCompanyAdmin) return [];
@@ -845,6 +858,41 @@ RLA CRM Platform
   void addUser(AppUser u) { _saveUser(u); _loadAll(); notifyListeners(); }
   void updateUser(AppUser u) { _saveUser(u); _loadAll(); notifyListeners(); }
   void deleteUser(String id) { _usersBox.delete(id); _loadAll(); notifyListeners(); }
+
+  /// Add a user and also assign them to the given project's assignedSalesIds list.
+  void addUserAndAssignToProject(AppUser u, String? projectId) {
+    _saveUser(u);
+    if (projectId != null && u.role == UserRole.sales) {
+      try {
+        final project = _projects.firstWhere((p) => p.id == projectId);
+        if (!project.assignedSalesIds.contains(u.id)) {
+          final updatedProject = RealEstateProject(
+            id: project.id,
+            name: project.name,
+            location: project.location,
+            description: project.description,
+            developerName: project.developerName,
+            propertyType: project.propertyType,
+            priceFrom: project.priceFrom,
+            priceTo: project.priceTo,
+            status: project.status,
+            assignedSalesIds: [...project.assignedSalesIds, u.id],
+            createdById: project.createdById,
+            createdByName: project.createdByName,
+            createdAt: project.createdAt,
+            updatedAt: DateTime.now(),
+            totalUnits: project.totalUnits,
+            reraNumber: project.reraNumber,
+            companyId: project.companyId,
+          );
+          _saveProject(updatedProject);
+        }
+      } catch (_) {}
+    }
+    _loadAll();
+    notifyListeners();
+  }
+
   void toggleUserActive(String id) {
     try {
       final u = _users.firstWhere((u) => u.id == id);

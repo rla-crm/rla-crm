@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:web/web.dart' as web;
+// web package removed — using url_launcher for all platforms
 import '../core/app_state.dart';
 import '../core/models.dart';
 import '../core/theme.dart';
@@ -566,25 +565,8 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> with TickerProvider
     setState(() {});
 
     // ── Launch ────────────────────────────────────────────────────────────────
-    if (kIsWeb) {
-      // On web: use dart:html window.open directly — MUST be synchronous
-      // (no await before this point) so the browser treats it as a
-      // direct user-gesture response and does NOT block the popup.
-      try {
-        if (type == 'call') {
-          // tel: — navigate same tab so OS intercepts it as a phone/dialer intent
-          web.window.location.assign(urlStr);
-        } else {
-          // WhatsApp & mailto — open new tab
-          web.window.open(urlStr, '_blank');
-        }
-      } catch (e) {
-        _showSnack(context, 'Could not open the link. Please try manually.', isError: true);
-      }
-    } else {
-      // Mobile / Desktop: use url_launcher asynchronously
-      _launchMobile(context, urlStr, type);
-    }
+    // Use url_launcher for all platforms
+    _launchMobile(context, urlStr, type);
   }
 
   Future<void> _launchMobile(BuildContext context, String urlStr, String type) async {
