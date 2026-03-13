@@ -1,10 +1,16 @@
 # Flutter/Dart
-# Build outputs (exclude to save space)
-# /build/ (included for Cloudflare Pages deployment)
+# Build outputs — keep build/web for Cloudflare Pages, exclude Android build artifacts
 /.dart_tool/
 .packages
 .pub-cache/
 .pub/
+
+# Android build artifacts (too large for GitHub)
+build/app/
+build/.cxx/
+android/build/
+android/app/build/
+android/.gradle/
 
 # IDE
 .vscode/

@@ -1,0 +1,58 @@
+{
+    "name": "RLA crm",
+    "short_name": "RLA crm",
+    "description": "Real Estate Lead Management CRM — manage projects, leads and sales teams.",
+    "start_url": "/",
+    "scope": "/",
+    "display": "standalone",
+    "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+    "orientation": "portrait-primary",
+    "background_color": "#F4F2FF",
+    "theme_color": "#7B5FFF",
+    "lang": "en",
+    "dir": "ltr",
+    "categories": ["business", "productivity"],
+    "prefer_related_applications": false,
+    "icons": [
+        {
+            "src": "icons/Icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "any"
+        },
+        {
+            "src": "icons/Icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any"
+        },
+        {
+            "src": "icons/Icon-maskable-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "maskable"
+        },
+        {
+            "src": "icons/Icon-maskable-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "maskable"
+        }
+    ],
+    "shortcuts": [
+        {
+            "name": "My Leads",
+            "short_name": "Leads",
+            "description": "View and manage your leads",
+            "url": "/?shortcut=leads",
+            "icons": [{ "src": "icons/Icon-192.png", "sizes": "192x192" }]
+        },
+        {
+            "name": "Projects",
+            "short_name": "Projects",
+            "description": "Browse all real estate projects",
+            "url": "/?shortcut=projects",
+            "icons": [{ "src": "icons/Icon-192.png", "sizes": "192x192" }]
+        }
+    ]
+}
