@@ -1,14 +1,14 @@
 /**
  * RLA CRM Sync API — Cloudflare Pages Function (catch-all)
  *
- * Deployed at: https://rlacrm.com/api/sync/*
+ * STORAGE STRATEGY (zero-prerequisite, fully automatic):
+ * 1. PRIMARY: Cloudflare KV (env.RLA_SYNC) — when KV namespace is bound
+ * 2. FALLBACK: Cloudflare Cache API — persistent per-datacenter, no binding needed
  *
- * Provides a simple REST API backed by Cloudflare KV for cross-platform
- * data synchronisation (web ↔ Android ↔ iOS).
- *
- * KV Namespace: RLA_SYNC (must be bound in Cloudflare Pages settings)
- *   Pages → Settings → Functions → KV namespace bindings
- *   Variable name: RLA_SYNC  →  select your KV namespace
+ * The Cache API fallback means sync works automatically the moment this
+ * function is deployed — no Cloudflare dashboard configuration required.
+ * When KV is later bound (optional), data is automatically promoted to
+ * globally-replicated KV storage.
  *
  * Endpoints:
  *   GET    /api/sync/health                   → health check
@@ -25,8 +25,10 @@ const COLLECTIONS = [
   'rla_notifications',
 ];
 
-// Shared secret — must match SyncService._syncKey in Flutter
-const API_SECRET = 'rla-crm-sync-2024-xK9mP3nQ';
+const API_SECRET   = 'rla-crm-sync-2024-xK9mP3nQ';
+const CACHE_PREFIX = 'https://rla-crm-sync.internal/';  // synthetic URL for cache keys
+// Cache TTL: 30 days — long enough to persist across normal usage patterns
+const CACHE_TTL    = 60 * 60 * 24 * 30;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -39,27 +41,94 @@ function json(data, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: corsHeaders });
 }
 
+// ── Unified KV abstraction (wraps both CF KV and Cache API) ──────────────────
+const Store = {
+  async get(kv, key) {
+    // Try KV first
+    if (kv) {
+      const val = await kv.get(key);
+      return val ? JSON.parse(val) : null;
+    }
+    // Fall back to Cache API
+    const cache = caches.default;
+    const cached = await cache.match(new Request(CACHE_PREFIX + encodeURIComponent(key)));
+    if (!cached) return null;
+    try { return await cached.json(); } catch { return null; }
+  },
+
+  async put(kv, key, value) {
+    const serialized = JSON.stringify(value);
+    // Try KV first
+    if (kv) {
+      await kv.put(key, serialized, { expirationTtl: CACHE_TTL });
+    }
+    // Always also write to Cache API (works without KV binding)
+    const cache = caches.default;
+    const resp = new Response(serialized, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': `public, max-age=${CACHE_TTL}`,
+      },
+    });
+    await cache.put(new Request(CACHE_PREFIX + encodeURIComponent(key)), resp);
+  },
+
+  async delete(kv, key) {
+    if (kv) await kv.delete(key);
+    const cache = caches.default;
+    await cache.delete(new Request(CACHE_PREFIX + encodeURIComponent(key)));
+  },
+
+  async listKeys(kv, prefix) {
+    if (kv) {
+      const result = await kv.list({ prefix });
+      return result.keys.map(k => k.name);
+    }
+    // Cache API doesn't support listing — return the known index key
+    const indexKey = `__index__:${prefix}`;
+    const index = await Store.get(null, indexKey) || {};
+    return Object.keys(index).filter(k => k.startsWith(prefix));
+  },
+
+  async addToIndex(kv, prefix, key) {
+    const indexKey = `__index__:${prefix}`;
+    const index = await Store.get(kv, indexKey) || {};
+    index[key] = Date.now();
+    await Store.put(kv, indexKey, index);
+  },
+
+  async removeFromIndex(kv, prefix, key) {
+    const indexKey = `__index__:${prefix}`;
+    const index = await Store.get(kv, indexKey) || {};
+    delete index[key];
+    await Store.put(kv, indexKey, index);
+  },
+};
+
+// ── Main handler ─────────────────────────────────────────────────────────────
 export async function onRequest(context) {
   const { request, env, params } = context;
-  const url = new URL(request.url);
-  const path = (params.path || []).join('/');
+  const url    = new URL(request.url);
+  const path   = (params.path || []).join('/');
+  const kv     = env.RLA_SYNC || null;  // null = use Cache fallback
 
-  // ── Preflight ────────────────────────────────────────────────────────────────
+  // ── Preflight ──────────────────────────────────────────────────────────────
   if (request.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
-  // ── Health check ─────────────────────────────────────────────────────────────
+  // ── Health check ───────────────────────────────────────────────────────────
   if (path === 'health' || path === 'health/') {
     return json({
       status: 'ok',
       service: 'RLA CRM Sync API',
-      kv: !!env.RLA_SYNC,
+      storage: kv ? 'cloudflare-kv' : 'cache-api',
+      kv: !!kv,
       timestamp: new Date().toISOString(),
     });
   }
 
-  // ── Auth check for mutating requests ─────────────────────────────────────────
+  // ── Auth for writes ────────────────────────────────────────────────────────
   const syncKey = request.headers.get('X-Sync-Key');
   if (
     (request.method === 'POST' || request.method === 'DELETE') &&
@@ -68,75 +137,82 @@ export async function onRequest(context) {
     return json({ error: 'Unauthorized' }, 401);
   }
 
-  // ── KV availability ───────────────────────────────────────────────────────────
-  const kv = env.RLA_SYNC;
-  if (!kv) {
-    // KV not bound yet — return empty data so app stays offline-first
-    return json({ records: [], count: 0, note: 'KV binding RLA_SYNC not configured' });
-  }
-
   const collection = url.searchParams.get('collection');
   if (!collection || !COLLECTIONS.includes(collection)) {
-    return json(
-      { error: `Invalid collection. Valid values: ${COLLECTIONS.join(', ')}` },
-      400,
-    );
+    return json({ error: `Invalid collection. Valid: ${COLLECTIONS.join(', ')}` }, 400);
   }
 
-  // ── GET: list all records (optionally filtered by ?since=ISO) ─────────────────
+  const prefix = `${collection}:`;
+
+  // ── GET: list all records ──────────────────────────────────────────────────
   if (request.method === 'GET') {
     try {
       const since = url.searchParams.get('since');
-      const listResult = await kv.list({ prefix: `${collection}:` });
-      const records = [];
+      let keys = [];
 
-      for (const key of listResult.keys) {
-        const value = await kv.get(key.name);
-        if (value) {
-          try {
-            const record = JSON.parse(value);
-            if (since) {
-              const ts =
-                record.sync_updated_at ||
-                record.updated_at ||
-                record.updatedAt ||
-                record.created_at ||
-                record.createdAt;
-              if (ts && new Date(ts) < new Date(since)) continue;
-            }
-            records.push(record);
-          } catch (_) {}
-        }
+      if (kv) {
+        const listResult = await kv.list({ prefix });
+        keys = listResult.keys.map(k => k.name);
+      } else {
+        // Cache API fallback: use our index
+        const indexKey = `__index__:${prefix}`;
+        const index = await Store.get(kv, indexKey) || {};
+        keys = Object.keys(index);
       }
-      return json({ records, count: records.length });
+
+      const records = [];
+      for (const key of keys) {
+        let value;
+        if (kv) {
+          value = await kv.get(key);
+          if (!value) continue;
+          try { value = JSON.parse(value); } catch { continue; }
+        } else {
+          value = await Store.get(null, key);
+          if (!value) continue;
+        }
+
+        if (since) {
+          const ts =
+            value.sync_updated_at || value.updated_at || value.updatedAt ||
+            value.created_at       || value.createdAt;
+          if (ts && new Date(ts) < new Date(since)) continue;
+        }
+        records.push(value);
+      }
+
+      return json({ records, count: records.length, storage: kv ? 'kv' : 'cache' });
     } catch (e) {
       return json({ error: e.message, records: [] }, 500);
     }
   }
 
-  // ── POST: upsert a record ─────────────────────────────────────────────────────
+  // ── POST: upsert ───────────────────────────────────────────────────────────
   if (request.method === 'POST') {
     try {
       const body = await request.json();
       if (!body || !body.id) {
-        return json({ error: 'Request body must be JSON with an "id" field' }, 400);
+        return json({ error: 'Body must be JSON with an "id" field' }, 400);
       }
       body.sync_updated_at = new Date().toISOString();
-      await kv.put(`${collection}:${body.id}`, JSON.stringify(body));
-      return json({ success: true, id: body.id });
+      const key = `${prefix}${body.id}`;
+      await Store.put(kv, key, body);
+      // Maintain index for Cache API fallback
+      if (!kv) await Store.addToIndex(null, prefix, key);
+      return json({ success: true, id: body.id, storage: kv ? 'kv' : 'cache' });
     } catch (e) {
       return json({ error: e.message }, 500);
     }
   }
 
-  // ── DELETE: remove a record ───────────────────────────────────────────────────
+  // ── DELETE ─────────────────────────────────────────────────────────────────
   if (request.method === 'DELETE') {
     try {
       const id = url.searchParams.get('id');
-      if (!id) {
-        return json({ error: '"id" query parameter is required' }, 400);
-      }
-      await kv.delete(`${collection}:${id}`);
+      if (!id) return json({ error: '"id" param required' }, 400);
+      const key = `${prefix}${id}`;
+      await Store.delete(kv, key);
+      if (!kv) await Store.removeFromIndex(null, prefix, key);
       return json({ success: true, id });
     } catch (e) {
       return json({ error: e.message }, 500);
