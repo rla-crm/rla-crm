@@ -144,7 +144,8 @@ class GlassCard extends StatelessWidget {
 // ─── Gradient Button ─────────────────────────────────────────────────────────
 class GradientButton extends StatelessWidget {
   final String label;
-  final VoidCallback? onTap;
+  // Accepts both sync (VoidCallback) and async (Future<void> Function()) callbacks
+  final Function()? onTap;
   final bool isLoading;
   final IconData? icon;
   final Gradient? gradient;

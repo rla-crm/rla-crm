@@ -358,82 +358,111 @@ RLA CRM Platform
 
     _loadAll();
 
-    // Seed master admin if no users exist locally yet
+    // On a fresh install (no local data at all) we MUST wait for the cloud
+    // sync to complete before allowing login — otherwise users created on
+    // web/another device cannot be found.
     if (_users.isEmpty) {
-      _seedData();
+      // Try to pull cloud data first; only seed master admin as fallback
+      await _syncFromCloud();
+      if (_users.isEmpty) {
+        // Still empty → truly fresh install with no cloud data → seed defaults
+        _seedData();
+      }
+    } else {
+      // Existing local data — pull cloud in background so UI isn't blocked
+      _syncFromCloud();
     }
-
-    // Pull cloud data and merge into local storage
-    // (runs in background — app is usable immediately from local cache)
-    _syncFromCloud();
   }
 
   // ─── Cloud sync: pull all remote data and merge into local Hive ──────────
   Future<void> _syncFromCloud() async {
     try {
       final remote = await SyncService.pullAll();
-      if (remote.isEmpty) return;
+      // remote.isEmpty means KV binding not configured → silently skip
+      // but we still call _loadAll so in-memory lists reflect Hive state
+      if (remote.isEmpty) {
+        _loadAll();
+        notifyListeners();
+        return;
+      }
 
-      bool changed = false;
+      int mergedCount = 0;
 
-      // Merge users
+      // ── Merge users (remote is authoritative for existing IDs) ────────────
       final remoteUsers = remote[SyncService.kUsers] ?? [];
       for (final raw in remoteUsers) {
         try {
           final u = AppUser.fromMap(raw);
-          // Always overwrite local with remote (remote is authoritative)
           _usersBox.put(u.id, jsonEncode(u.toMap()));
-          changed = true;
-        } catch (_) {}
+          mergedCount++;
+        } catch (e) {
+          if (kDebugMode) debugPrint('⚠️ merge user: $e  raw=$raw');
+        }
       }
 
-      // Merge leads
+      // ── Merge leads ───────────────────────────────────────────────────────
       final remoteLeads = remote[SyncService.kLeads] ?? [];
       for (final raw in remoteLeads) {
         try {
           final l = Lead.fromMap(raw);
           _leadsBox.put(l.id, jsonEncode(l.toMap()));
-          changed = true;
-        } catch (_) {}
+          mergedCount++;
+        } catch (e) {
+          if (kDebugMode) debugPrint('⚠️ merge lead: $e');
+        }
       }
 
-      // Merge projects
+      // ── Merge projects ────────────────────────────────────────────────────
       final remoteProjects = remote[SyncService.kProjects] ?? [];
       for (final raw in remoteProjects) {
         try {
           final p = RealEstateProject.fromMap(raw);
           _projectsBox.put(p.id, jsonEncode(p.toMap()));
-          changed = true;
-        } catch (_) {}
+          mergedCount++;
+        } catch (e) {
+          if (kDebugMode) debugPrint('⚠️ merge project: $e');
+        }
       }
 
-      // Merge approvals
+      // ── Merge approvals ───────────────────────────────────────────────────
       final remoteApprovals = remote[SyncService.kApprovals] ?? [];
       for (final raw in remoteApprovals) {
         try {
           final a = ApprovalRequest.fromMap(raw);
           _approvalsBox.put(a.id, jsonEncode(a.toMap()));
-          changed = true;
-        } catch (_) {}
+          mergedCount++;
+        } catch (e) {
+          if (kDebugMode) debugPrint('⚠️ merge approval: $e');
+        }
       }
 
-      // Merge notifications
+      // ── Merge notifications ───────────────────────────────────────────────
       final remoteNotifs = remote[SyncService.kNotifications] ?? [];
       for (final raw in remoteNotifs) {
         try {
           final n = CrmNotification.fromMap(raw);
           _notifBox.put(n.id, jsonEncode(n.toMap()));
-          changed = true;
-        } catch (_) {}
+          mergedCount++;
+        } catch (e) {
+          if (kDebugMode) debugPrint('⚠️ merge notif: $e');
+        }
       }
 
-      if (changed) {
-        _loadAll();
-        notifyListeners();
-        if (kDebugMode) debugPrint('✅ AppState: cloud sync complete');
+      // Always reload + notify so UI reflects latest merged state
+      _loadAll();
+      notifyListeners();
+      if (kDebugMode) {
+        debugPrint('✅ AppState: cloud sync complete — '
+            '${remoteUsers.length} users, '
+            '${remoteLeads.length} leads, '
+            '${remoteProjects.length} projects '
+            '($mergedCount records merged)');
       }
     } catch (e) {
       if (kDebugMode) debugPrint('⚠️ AppState._syncFromCloud: $e');
+      // Still reload so in-memory lists reflect current Hive state
+      _loadAll();
+      notifyListeners();
     }
   }
 

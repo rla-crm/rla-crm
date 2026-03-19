@@ -49,19 +49,26 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
     super.dispose();
   }
 
-  void _login() async {
-    if (_emailCtrl.text.trim().isEmpty || _passCtrl.text.trim().isEmpty) {
-      setState(() { _loading = false; _error = 'Please enter your email and password.'; });
+  Future<void> _login() async {
+    final email = _emailCtrl.text.trim();
+    final pass  = _passCtrl.text.trim();
+    if (email.isEmpty || pass.isEmpty) {
+      setState(() { _error = 'Please enter your email and password.'; });
       return;
     }
     setState(() { _loading = true; _error = null; });
-    await Future.delayed(const Duration(milliseconds: 400));
     if (!mounted) return;
     final state = context.read<AppState>();
-    final err = state.loginWithError(_emailCtrl.text.trim(), _passCtrl.text.trim());
+
+    // Use the async version which awaits a cloud sync before authenticating.
+    // This ensures users created on web / another device are always found,
+    // even on the very first login attempt on a fresh install.
+    final err = await state.loginWithErrorAsync(email, pass);
+
+    if (!mounted) return;
     if (err == null) {
       if (_rememberMe) {
-        state.saveRememberMe(_emailCtrl.text.trim(), _passCtrl.text.trim());
+        state.saveRememberMe(email, pass);
       } else {
         state.clearRememberMe();
       }
