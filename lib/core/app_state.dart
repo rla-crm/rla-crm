@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'models.dart';
+import '../services/sync_service.dart';
 
 // ─── Signup Result ────────────────────────────────────────────────────────────
 class SignupResult {
@@ -347,7 +348,6 @@ RLA CRM Platform
 
   Future<void> init() async {
     await Hive.initFlutter();
-    // v9 — clean slate (no migration from older boxes; removes all test/demo users)
     _usersBox      = await Hive.openBox('users_v9');
     _leadsBox      = await Hive.openBox('leads_v9');
     _notifBox      = await Hive.openBox('notifs_v9');
@@ -357,29 +357,102 @@ RLA CRM Platform
     _settingsBox   = await Hive.openBox('settings_v9');
 
     _loadAll();
-    // Enforce: only master admin exists in fresh install
-    _ensureOnlyMasterAdmin();
+
+    // Seed master admin if no users exist locally yet
+    if (_users.isEmpty) {
+      _seedData();
+    }
+
+    // Pull cloud data and merge into local storage
+    // (runs in background — app is usable immediately from local cache)
+    _syncFromCloud();
   }
 
-  /// Wipes all non-master-admin users and re-seeds master admin if missing.
-  void _ensureOnlyMasterAdmin() {
-    // Remove any user that is NOT a master admin (clean slate)
-    final nonMasterKeys = _usersBox.keys.where((k) {
-      try {
-        final u = AppUser.fromMap(Map<String, dynamic>.from(jsonDecode(_usersBox.get(k))));
-        return u.role != UserRole.masterAdmin;
-      } catch (_) { return false; }
-    }).toList();
-    for (final k in nonMasterKeys) { _usersBox.delete(k); }
+  // ─── Cloud sync: pull all remote data and merge into local Hive ──────────
+  Future<void> _syncFromCloud() async {
+    try {
+      final remote = await SyncService.pullAll();
+      if (remote.isEmpty) return;
 
-    // Re-seed master admin if box is empty after cleanup
-    _loadAll();
-    if (_users.where((u) => u.role == UserRole.masterAdmin).isEmpty) {
-      _seedData();
+      bool changed = false;
+
+      // Merge users
+      final remoteUsers = remote[SyncService.kUsers] ?? [];
+      for (final raw in remoteUsers) {
+        try {
+          final u = AppUser.fromMap(raw);
+          // Always overwrite local with remote (remote is authoritative)
+          _usersBox.put(u.id, jsonEncode(u.toMap()));
+          changed = true;
+        } catch (_) {}
+      }
+
+      // Merge leads
+      final remoteLeads = remote[SyncService.kLeads] ?? [];
+      for (final raw in remoteLeads) {
+        try {
+          final l = Lead.fromMap(raw);
+          _leadsBox.put(l.id, jsonEncode(l.toMap()));
+          changed = true;
+        } catch (_) {}
+      }
+
+      // Merge projects
+      final remoteProjects = remote[SyncService.kProjects] ?? [];
+      for (final raw in remoteProjects) {
+        try {
+          final p = RealEstateProject.fromMap(raw);
+          _projectsBox.put(p.id, jsonEncode(p.toMap()));
+          changed = true;
+        } catch (_) {}
+      }
+
+      // Merge approvals
+      final remoteApprovals = remote[SyncService.kApprovals] ?? [];
+      for (final raw in remoteApprovals) {
+        try {
+          final a = ApprovalRequest.fromMap(raw);
+          _approvalsBox.put(a.id, jsonEncode(a.toMap()));
+          changed = true;
+        } catch (_) {}
+      }
+
+      // Merge notifications
+      final remoteNotifs = remote[SyncService.kNotifications] ?? [];
+      for (final raw in remoteNotifs) {
+        try {
+          final n = CrmNotification.fromMap(raw);
+          _notifBox.put(n.id, jsonEncode(n.toMap()));
+          changed = true;
+        } catch (_) {}
+      }
+
+      if (changed) {
+        _loadAll();
+        notifyListeners();
+        if (kDebugMode) debugPrint('✅ AppState: cloud sync complete');
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('⚠️ AppState._syncFromCloud: $e');
     }
   }
 
-  // Migration removed in v9 — clean slate, no test data carried forward
+  /// Push a single user to the cloud (called after every local user save)
+  void _syncUser(AppUser u) {
+    SyncService.upsert(SyncService.kUsers, u.toMap());
+  }
+  void _syncLead(Lead l) {
+    SyncService.upsert(SyncService.kLeads, l.toMap());
+  }
+  void _syncProject(RealEstateProject p) {
+    SyncService.upsert(SyncService.kProjects, p.toMap());
+  }
+  void _syncApproval(ApprovalRequest a) {
+    SyncService.upsert(SyncService.kApprovals, a.toMap());
+  }
+  void _syncNotification(CrmNotification n) {
+    SyncService.upsert(SyncService.kNotifications, n.toMap());
+  }
 
   void _loadAll() {
     _users = _usersBox.values.map((v) => AppUser.fromMap(Map<String, dynamic>.from(jsonDecode(v)))).toList();
@@ -406,11 +479,26 @@ RLA CRM Platform
     _loadAll();
   }
 
-  void _saveUser(AppUser u) => _usersBox.put(u.id, jsonEncode(u.toMap()));
-  void _saveLead(Lead l) => _leadsBox.put(l.id, jsonEncode(l.toMap()));
-  void _saveNotification(CrmNotification n) => _notifBox.put(n.id, jsonEncode(n.toMap()));
-  void _saveProject(RealEstateProject p) => _projectsBox.put(p.id, jsonEncode(p.toMap()));
-  void _saveApproval(ApprovalRequest a) => _approvalsBox.put(a.id, jsonEncode(a.toMap()));
+  void _saveUser(AppUser u) {
+    _usersBox.put(u.id, jsonEncode(u.toMap()));
+    _syncUser(u); // push to cloud in background
+  }
+  void _saveLead(Lead l) {
+    _leadsBox.put(l.id, jsonEncode(l.toMap()));
+    _syncLead(l);
+  }
+  void _saveNotification(CrmNotification n) {
+    _notifBox.put(n.id, jsonEncode(n.toMap()));
+    _syncNotification(n);
+  }
+  void _saveProject(RealEstateProject p) {
+    _projectsBox.put(p.id, jsonEncode(p.toMap()));
+    _syncProject(p);
+  }
+  void _saveApproval(ApprovalRequest a) {
+    _approvalsBox.put(a.id, jsonEncode(a.toMap()));
+    _syncApproval(a);
+  }
   void _saveEmailLog(EmailLog e) => _emailLogsBox.put(e.id, jsonEncode(e.toMap()));
 
   // ─── Email Simulation ─────────────────────────────────────────────────────
@@ -436,7 +524,12 @@ RLA CRM Platform
 
   // ─── Authentication ───────────────────────────────────────────────────────
   /// Returns null on success, or an error message string on failure.
-  String? loginWithError(String emailOrUsername, String password) {
+  /// On success, also triggers a background cloud sync so the user
+  /// immediately sees the latest data from all platforms.
+  Future<String?> loginWithErrorAsync(String emailOrUsername, String password) async {
+    // First: sync from cloud so we have the latest user list
+    await _syncFromCloud();
+
     AppUser? user;
     try {
       user = _users.firstWhere(
@@ -452,9 +545,34 @@ RLA CRM Platform
     return null;
   }
 
+  /// Synchronous login (tries local cache first, then falls back gracefully)
+  String? loginWithError(String emailOrUsername, String password) {
+    AppUser? user;
+    try {
+      user = _users.firstWhere(
+          (u) => u.email.toLowerCase() == emailOrUsername.toLowerCase());
+    } catch (_) {
+      return 'No account found with this email address';
+    }
+    if (user.password != password) return 'Incorrect password. Please try again';
+    if (!user.isApproved) return 'Your account is pending approval. Please contact the admin';
+    if (!user.isActive) return 'Your account has been deactivated. Please contact the admin';
+    _currentUser = user;
+    notifyListeners();
+    // Trigger background sync after successful login
+    _syncFromCloud();
+    return null;
+  }
+
   bool login(String emailOrUsername, String password) {
     return loginWithError(emailOrUsername, password) == null;
   }
+
+  /// Manual refresh from cloud — call this from pull-to-refresh or on app resume
+  Future<void> refreshFromCloud() => _syncFromCloud();
+
+  /// Returns true if sync service is available (has network + API reachable)
+  bool get isSyncAvailable => SyncService.isAvailable;
 
   void logout() {
     _currentUser = null;
@@ -792,12 +910,12 @@ RLA CRM Platform
   // ─── CRUD: Projects ───────────────────────────────────────────────────────
   void addProject(RealEstateProject p) { _saveProject(p); _loadAll(); notifyListeners(); }
   void updateProject(RealEstateProject p) { p.updatedAt = DateTime.now(); _saveProject(p); _loadAll(); notifyListeners(); }
-  void deleteProject(String id) { _projectsBox.delete(id); _loadAll(); notifyListeners(); }
+  void deleteProject(String id) { _projectsBox.delete(id); SyncService.delete(SyncService.kProjects, id); _loadAll(); notifyListeners(); }
 
   // ─── CRUD: Users ──────────────────────────────────────────────────────────
   void addUser(AppUser u) { _saveUser(u); _loadAll(); notifyListeners(); }
   void updateUser(AppUser u) { _saveUser(u); _loadAll(); notifyListeners(); }
-  void deleteUser(String id) { _usersBox.delete(id); _loadAll(); notifyListeners(); }
+  void deleteUser(String id) { _usersBox.delete(id); SyncService.delete(SyncService.kUsers, id); _loadAll(); notifyListeners(); }
 
   /// Add a user and also assign them to the given project's assignedSalesIds list.
   void addUserAndAssignToProject(AppUser u, String? projectId) {
@@ -851,11 +969,11 @@ RLA CRM Platform
   // ─── CRUD: Leads ──────────────────────────────────────────────────────────
   void addLead(Lead l) { _saveLead(l); _loadAll(); notifyListeners(); }
   void updateLead(Lead l) { l.updatedAt = DateTime.now(); _saveLead(l); _loadAll(); notifyListeners(); }
-  void deleteLead(String id) { _leadsBox.delete(id); _loadAll(); notifyListeners(); }
+  void deleteLead(String id) { _leadsBox.delete(id); SyncService.delete(SyncService.kLeads, id); _loadAll(); notifyListeners(); }
 
   // ─── CRUD: Notifications ──────────────────────────────────────────────────
   void addNotification(CrmNotification n) { _saveNotification(n); _loadAll(); notifyListeners(); }
-  void deleteNotification(String id) { _notifBox.delete(id); _loadAll(); notifyListeners(); }
+  void deleteNotification(String id) { _notifBox.delete(id); SyncService.delete(SyncService.kNotifications, id); _loadAll(); notifyListeners(); }
   void markNotificationRead(String id) {
     try {
       final n = _notifications.firstWhere((n) => n.id == id);

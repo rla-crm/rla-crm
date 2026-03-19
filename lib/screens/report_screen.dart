@@ -1,4 +1,7 @@
 import 'dart:typed_data';
+// ignore: avoid_web_libraries_in_flutter
+import 'dart:html' as html show AnchorElement, Url, Blob;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:pdf/pdf.dart';
@@ -619,7 +622,29 @@ class _ReportPreviewSheetState extends State<ReportPreviewSheet> {
       final now = DateTime.now();
       final fname =
           'RLA_Report_${widget.project.name.replaceAll(' ', '_')}_${now.day}-${now.month}-${now.year}.pdf';
-      await Printing.sharePdf(bytes: bytes, filename: fname);
+
+      if (kIsWeb) {
+        // ── Web: use dart:html blob anchor download ──────────────────────
+        final blob = html.Blob([bytes], 'application/pdf');
+        final url = html.Url.createObjectUrlFromBlob(blob);
+        (html.AnchorElement(href: url)
+              ..setAttribute('download', fname)
+              ..click())
+            .remove();
+        html.Url.revokeObjectUrl(url);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('PDF downloaded: $fname'),
+              backgroundColor: Colors.green.shade700,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      } else {
+        // ── Mobile/Desktop: use the printing package share sheet ──────────
+        await Printing.sharePdf(bytes: bytes, filename: fname);
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
