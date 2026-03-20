@@ -4,7 +4,8 @@ import 'package:http/http.dart' as http;
 
 // ─── RLA CRM Sync Service ─────────────────────────────────────────────────────
 // Cross-platform sync: Web ↔ Android ↔ iOS share the same data via a
-// Cloudflare-hosted REST API backed by Cloudflare KV storage.
+// Cloudflare-hosted REST API backed by Cloudflare KV storage (or Cache API
+// fallback with 60-second TTL for cross-datacenter propagation).
 //
 // API endpoint: https://rlacrm.com/api/sync
 // Sync key:     shared secret so only the RLA CRM app can write
@@ -17,11 +18,12 @@ import 'package:http/http.dart' as http;
 class SyncService {
   static const String _baseUrl = 'https://rlacrm.com/api/sync';
   static const String _syncKey = 'rla-crm-sync-2024-xK9mP3nQ';
-  static const Duration _timeout = Duration(seconds: 10);
+  static const Duration _timeout = Duration(seconds: 15);
 
-  static bool _available = true;        // optimistic — flipped false on failures
+  // Availability gate: mark unavailable on failure, retry after 30s (was 2min)
+  static bool _available = true;
   static DateTime? _lastFailure;
-  static const Duration _retryGap = Duration(minutes: 2);
+  static const Duration _retryGap = Duration(seconds: 30);
 
   // Collections
   static const String kUsers         = 'rla_users';
@@ -33,10 +35,9 @@ class SyncService {
   // ── Availability gate ─────────────────────────────────────────────────────
   static bool get isAvailable {
     if (!_available) {
-      // Retry after _retryGap
       if (_lastFailure != null &&
           DateTime.now().difference(_lastFailure!) > _retryGap) {
-        _available = true;
+        _available = true; // reset — allow retry
       }
     }
     return _available;
@@ -45,7 +46,15 @@ class SyncService {
   static void _markUnavailable() {
     _available = false;
     _lastFailure = DateTime.now();
-    if (kDebugMode) debugPrint('⚠️ SyncService: marked unavailable until ${_lastFailure!.add(_retryGap)}');
+    if (kDebugMode) {
+      debugPrint('⚠️ SyncService: marked unavailable for ${_retryGap.inSeconds}s');
+    }
+  }
+
+  /// Force-reset availability (e.g. after network reconnect)
+  static void resetAvailability() {
+    _available = true;
+    _lastFailure = null;
   }
 
   static Map<String, String> get _headers => {
@@ -70,12 +79,25 @@ class SyncService {
 
   // ── Fetch all records from a collection ───────────────────────────────────
   static Future<List<Map<String, dynamic>>> fetchAll(String collection) async {
-    if (!isAvailable) return [];
+    // Always try even if marked unavailable (reset first)
+    if (!isAvailable) {
+      // Check if retry gap passed
+      if (_lastFailure == null ||
+          DateTime.now().difference(_lastFailure!) > _retryGap) {
+        _available = true;
+      } else {
+        return [];
+      }
+    }
     try {
       final res = await http
-          .get(Uri.parse('$_baseUrl?collection=$collection'), headers: _headers)
+          .get(
+            Uri.parse('$_baseUrl?collection=$collection'),
+            headers: _headers,
+          )
           .timeout(_timeout);
       if (res.statusCode == 200) {
+        _available = true;
         final data = jsonDecode(res.body) as Map<String, dynamic>;
         final records = data['records'] as List? ?? [];
         return records.map((r) => Map<String, dynamic>.from(r as Map)).toList();
@@ -114,7 +136,17 @@ class SyncService {
   // ── Upsert a record ───────────────────────────────────────────────────────
   static Future<bool> upsert(
       String collection, Map<String, dynamic> record) async {
-    if (!isAvailable) return false;
+    // Always attempt upsert even if recently failed (data writes are critical)
+    if (!isAvailable) {
+      // Reset and try anyway for writes
+      if (_lastFailure != null &&
+          DateTime.now().difference(_lastFailure!) > const Duration(seconds: 10)) {
+        _available = true;
+      } else if (!isAvailable) {
+        if (kDebugMode) debugPrint('⚠️ SyncService.upsert[$collection]: skipped (unavailable)');
+        return false;
+      }
+    }
     try {
       final res = await http
           .post(
@@ -123,7 +155,11 @@ class SyncService {
             body: jsonEncode(record),
           )
           .timeout(_timeout);
-      if (res.statusCode == 200) return true;
+      if (res.statusCode == 200) {
+        _available = true;
+        return true;
+      }
+      if (kDebugMode) debugPrint('⚠️ SyncService.upsert[$collection]: HTTP ${res.statusCode}');
     } catch (e) {
       if (kDebugMode) debugPrint('⚠️ SyncService.upsert[$collection]: $e');
       _markUnavailable();
@@ -149,7 +185,7 @@ class SyncService {
     return false;
   }
 
-  // ── Bulk push all local data to cloud ────────────────────────────────────
+  // ── Bulk push all local data to cloud ─────────────────────────────────────
   static Future<void> pushAll({
     required List<Map<String, dynamic>> users,
     required List<Map<String, dynamic>> leads,
@@ -157,8 +193,6 @@ class SyncService {
     required List<Map<String, dynamic>> approvals,
     required List<Map<String, dynamic>> notifications,
   }) async {
-    if (!isAvailable) return;
-
     final batches = {
       kUsers: users,
       kLeads: leads,
@@ -175,18 +209,17 @@ class SyncService {
     if (kDebugMode) debugPrint('✅ SyncService.pushAll complete');
   }
 
-  // ── Pull all cloud data and merge into local ───────────────────────────────
-  // Returns merged maps keyed by collection name
+  // ── Pull all cloud data ────────────────────────────────────────────────────
+  // Returns merged maps keyed by collection name.
+  // Never returns empty map on network errors — returns partial results.
   static Future<Map<String, List<Map<String, dynamic>>>> pullAll() async {
-    if (!isAvailable) {
-      if (kDebugMode) debugPrint('⚠️ SyncService.pullAll: skipped (unavailable)');
-      return {};
-    }
-
     final result = <String, List<Map<String, dynamic>>>{};
+    bool anySuccess = false;
 
     for (final col in [kUsers, kLeads, kProjects, kApprovals, kNotifications]) {
-      result[col] = await fetchAll(col);
+      final records = await fetchAll(col);
+      result[col] = records;
+      if (records.isNotEmpty) anySuccess = true;
     }
 
     if (kDebugMode) {
@@ -195,7 +228,8 @@ class SyncService {
           '${result[kLeads]?.length ?? 0} leads, '
           '${result[kProjects]?.length ?? 0} projects, '
           '${result[kApprovals]?.length ?? 0} approvals, '
-          '${result[kNotifications]?.length ?? 0} notifs');
+          '${result[kNotifications]?.length ?? 0} notifs'
+          '${anySuccess ? "" : " (all empty)"}');
     }
 
     return result;

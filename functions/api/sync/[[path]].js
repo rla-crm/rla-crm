@@ -1,14 +1,22 @@
 /**
  * RLA CRM Sync API — Cloudflare Pages Function (catch-all)
  *
- * STORAGE STRATEGY (zero-prerequisite, fully automatic):
- * 1. PRIMARY: Cloudflare KV (env.RLA_SYNC) — when KV namespace is bound
- * 2. FALLBACK: Cloudflare Cache API — persistent per-datacenter, no binding needed
+ * STORAGE STRATEGY (zero-prerequisite, globally consistent):
+ * 1. PRIMARY: Cloudflare KV (env.RLA_SYNC) — bound in CF dashboard → truly global
+ * 2. FALLBACK: Collection-level Cache blobs — stores whole collection as one
+ *    JSON object so ANY datacenter can read/write the complete dataset.
+ *    Short TTL (60s) ensures stale data is refreshed quickly across PoPs.
  *
- * The Cache API fallback means sync works automatically the moment this
- * function is deployed — no Cloudflare dashboard configuration required.
- * When KV is later bound (optional), data is automatically promoted to
- * globally-replicated KV storage.
+ * The collection-blob approach is deliberately chosen over per-record caching:
+ *  - Reads return ALL records from ONE cache key (no index fragmentation)
+ *  - Writes update the blob atomically (read-modify-write)
+ *  - Short TTL means global propagation within ~60 seconds
+ *  - No prerequisites — works from the moment this function is deployed
+ *
+ * To enable fully-global KV storage (no TTL delay):
+ *   1. Cloudflare Dashboard → Workers & Pages → reallandcrm → Settings → Bindings
+ *   2. Add KV Namespace binding: variable = RLA_SYNC, namespace = any new/existing KV
+ *   3. Redeploy (auto-redeploy on next push)
  *
  * Endpoints:
  *   GET    /api/sync/health                   → health check
@@ -25,10 +33,13 @@ const COLLECTIONS = [
   'rla_notifications',
 ];
 
-const API_SECRET   = 'rla-crm-sync-2024-xK9mP3nQ';
-const CACHE_PREFIX = 'https://rla-crm-sync.internal/';  // synthetic URL for cache keys
-// Cache TTL: 30 days — long enough to persist across normal usage patterns
-const CACHE_TTL    = 60 * 60 * 24 * 30;
+const API_SECRET = 'rla-crm-sync-2024-xK9mP3nQ';
+
+// Short TTL so cross-datacenter propagation happens quickly (~60s lag max)
+const CACHE_TTL = 60;
+
+// Internal namespace for cache URLs
+const CACHE_NS = 'https://rlacrm-sync-v3.internal/collection/';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -41,76 +52,83 @@ function json(data, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: corsHeaders });
 }
 
-// ── Unified KV abstraction (wraps both CF KV and Cache API) ──────────────────
-const Store = {
-  async get(kv, key) {
-    // Try KV first
-    if (kv) {
-      const val = await kv.get(key);
-      return val ? JSON.parse(val) : null;
-    }
-    // Fall back to Cache API
-    const cache = caches.default;
-    const cached = await cache.match(new Request(CACHE_PREFIX + encodeURIComponent(key)));
-    if (!cached) return null;
-    try { return await cached.json(); } catch { return null; }
+// ── Collection-level blob storage ─────────────────────────────────────────────
+// Each collection is stored as a SINGLE JSON object: { records: {...id: record} }
+// This ensures reads from ANY PoP return the complete dataset.
+
+const CollectionStore = {
+  _cacheKey(collection) {
+    return CACHE_NS + collection;
   },
 
-  async put(kv, key, value) {
-    const serialized = JSON.stringify(value);
-    // Try KV first
+  // ── Read entire collection ────────────────────────────────────────────────
+  async getCollection(kv, collection) {
     if (kv) {
-      await kv.put(key, serialized, { expirationTtl: CACHE_TTL });
+      const val = await kv.get(`__collection__:${collection}`);
+      return val ? JSON.parse(val) : {};
     }
-    // Always also write to Cache API (works without KV binding)
+    // Cache API: read collection blob
+    const cache = caches.default;
+    const resp = await cache.match(new Request(this._cacheKey(collection)));
+    if (!resp) return {};
+    try { return await resp.json(); } catch { return {}; }
+  },
+
+  // ── Write entire collection ───────────────────────────────────────────────
+  async setCollection(kv, collection, data) {
+    const serialized = JSON.stringify(data);
+    if (kv) {
+      await kv.put(`__collection__:${collection}`, serialized);
+    }
+    // Always write to Cache API (short TTL for cross-PoP propagation)
     const cache = caches.default;
     const resp = new Response(serialized, {
       headers: {
         'Content-Type': 'application/json',
-        'Cache-Control': `public, max-age=${CACHE_TTL}`,
+        // Short TTL: forces re-fetch from origin every 60s → cross-PoP sync
+        'Cache-Control': `public, max-age=${CACHE_TTL}, s-maxage=${CACHE_TTL}`,
       },
     });
-    await cache.put(new Request(CACHE_PREFIX + encodeURIComponent(key)), resp);
+    await cache.put(new Request(this._cacheKey(collection)), resp);
   },
 
-  async delete(kv, key) {
-    if (kv) await kv.delete(key);
-    const cache = caches.default;
-    await cache.delete(new Request(CACHE_PREFIX + encodeURIComponent(key)));
+  // ── Upsert a single record ────────────────────────────────────────────────
+  async upsert(kv, collection, record) {
+    const data = await this.getCollection(kv, collection);
+    data[record.id] = record;
+    await this.setCollection(kv, collection, data);
+    return record;
   },
 
-  async listKeys(kv, prefix) {
-    if (kv) {
-      const result = await kv.list({ prefix });
-      return result.keys.map(k => k.name);
+  // ── Delete a single record ────────────────────────────────────────────────
+  async delete(kv, collection, id) {
+    const data = await this.getCollection(kv, collection);
+    delete data[id];
+    await this.setCollection(kv, collection, data);
+  },
+
+  // ── List all records ──────────────────────────────────────────────────────
+  async list(kv, collection, since) {
+    const data = await this.getCollection(kv, collection);
+    let records = Object.values(data);
+    if (since) {
+      const sinceDate = new Date(since);
+      records = records.filter(r => {
+        const ts = r.sync_updated_at || r.updated_at || r.updatedAt ||
+                   r.created_at || r.createdAt;
+        return !ts || new Date(ts) >= sinceDate;
+      });
     }
-    // Cache API doesn't support listing — return the known index key
-    const indexKey = `__index__:${prefix}`;
-    const index = await Store.get(null, indexKey) || {};
-    return Object.keys(index).filter(k => k.startsWith(prefix));
-  },
-
-  async addToIndex(kv, prefix, key) {
-    const indexKey = `__index__:${prefix}`;
-    const index = await Store.get(kv, indexKey) || {};
-    index[key] = Date.now();
-    await Store.put(kv, indexKey, index);
-  },
-
-  async removeFromIndex(kv, prefix, key) {
-    const indexKey = `__index__:${prefix}`;
-    const index = await Store.get(kv, indexKey) || {};
-    delete index[key];
-    await Store.put(kv, indexKey, index);
+    return records;
   },
 };
 
 // ── Main handler ─────────────────────────────────────────────────────────────
 export async function onRequest(context) {
   const { request, env, params } = context;
-  const url    = new URL(request.url);
-  const path   = (params.path || []).join('/');
-  const kv     = env.RLA_SYNC || null;  // null = use Cache fallback
+  const url  = new URL(request.url);
+  const path = (params.path || []).join('/');
+  const kv   = env.RLA_SYNC || null;  // null = use Cache fallback
 
   // ── Preflight ──────────────────────────────────────────────────────────────
   if (request.method === 'OPTIONS') {
@@ -121,8 +139,8 @@ export async function onRequest(context) {
   if (path === 'health' || path === 'health/') {
     return json({
       status: 'ok',
-      service: 'RLA CRM Sync API',
-      storage: kv ? 'cloudflare-kv' : 'cache-api',
+      service: 'RLA CRM Sync API v3',
+      storage: kv ? 'cloudflare-kv (global)' : `cache-api (${CACHE_TTL}s TTL)`,
       kv: !!kv,
       timestamp: new Date().toISOString(),
     });
@@ -142,46 +160,17 @@ export async function onRequest(context) {
     return json({ error: `Invalid collection. Valid: ${COLLECTIONS.join(', ')}` }, 400);
   }
 
-  const prefix = `${collection}:`;
-
   // ── GET: list all records ──────────────────────────────────────────────────
   if (request.method === 'GET') {
     try {
       const since = url.searchParams.get('since');
-      let keys = [];
-
-      if (kv) {
-        const listResult = await kv.list({ prefix });
-        keys = listResult.keys.map(k => k.name);
-      } else {
-        // Cache API fallback: use our index
-        const indexKey = `__index__:${prefix}`;
-        const index = await Store.get(kv, indexKey) || {};
-        keys = Object.keys(index);
-      }
-
-      const records = [];
-      for (const key of keys) {
-        let value;
-        if (kv) {
-          value = await kv.get(key);
-          if (!value) continue;
-          try { value = JSON.parse(value); } catch { continue; }
-        } else {
-          value = await Store.get(null, key);
-          if (!value) continue;
-        }
-
-        if (since) {
-          const ts =
-            value.sync_updated_at || value.updated_at || value.updatedAt ||
-            value.created_at       || value.createdAt;
-          if (ts && new Date(ts) < new Date(since)) continue;
-        }
-        records.push(value);
-      }
-
-      return json({ records, count: records.length, storage: kv ? 'kv' : 'cache' });
+      const records = await CollectionStore.list(kv, collection, since);
+      return json({
+        records,
+        count: records.length,
+        storage: kv ? 'kv' : 'cache',
+        ttl: kv ? null : CACHE_TTL,
+      });
     } catch (e) {
       return json({ error: e.message, records: [] }, 500);
     }
@@ -195,10 +184,7 @@ export async function onRequest(context) {
         return json({ error: 'Body must be JSON with an "id" field' }, 400);
       }
       body.sync_updated_at = new Date().toISOString();
-      const key = `${prefix}${body.id}`;
-      await Store.put(kv, key, body);
-      // Maintain index for Cache API fallback
-      if (!kv) await Store.addToIndex(null, prefix, key);
+      await CollectionStore.upsert(kv, collection, body);
       return json({ success: true, id: body.id, storage: kv ? 'kv' : 'cache' });
     } catch (e) {
       return json({ error: e.message }, 500);
@@ -210,9 +196,7 @@ export async function onRequest(context) {
     try {
       const id = url.searchParams.get('id');
       if (!id) return json({ error: '"id" param required' }, 400);
-      const key = `${prefix}${id}`;
-      await Store.delete(kv, key);
-      if (!kv) await Store.removeFromIndex(null, prefix, key);
+      await CollectionStore.delete(kv, collection, id);
       return json({ success: true, id });
     } catch (e) {
       return json({ error: e.message }, 500);

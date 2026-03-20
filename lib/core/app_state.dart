@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'models.dart';
 import '../services/sync_service.dart';
@@ -13,7 +15,7 @@ class SignupResult {
   bool get success => error == null;
 }
 
-class AppState extends ChangeNotifier {
+class AppState extends ChangeNotifier with WidgetsBindingObserver {
   late Box _usersBox;
   late Box _leadsBox;
   late Box _notifBox;
@@ -29,6 +31,12 @@ class AppState extends ChangeNotifier {
   List<RealEstateProject> _projects = [];
   List<ApprovalRequest> _approvals = [];
   List<EmailLog> _emailLogs = [];
+
+  // ─── Periodic sync timer ─────────────────────────────────────────────────
+  Timer? _syncTimer;
+  // Sync every 30 seconds when app is in foreground
+  static const Duration _syncInterval = Duration(seconds: 30);
+  bool _syncInProgress = false;
 
   // ─── Getters ─────────────────────────────────────────────────────────────
   AppUser? get currentUser => _currentUser;
@@ -358,37 +366,64 @@ RLA CRM Platform
 
     _loadAll();
 
-    // On a fresh install (no local data at all) we MUST wait for the cloud
-    // sync to complete before allowing login — otherwise users created on
-    // web/another device cannot be found.
+    // Always await cloud sync on init — ensures users created on other
+    // platforms are available before the login screen is shown.
+    await _syncFromCloud();
+
+    // If still empty after cloud sync → seed master admin as fallback
     if (_users.isEmpty) {
-      // Try to pull cloud data first; only seed master admin as fallback
-      await _syncFromCloud();
-      if (_users.isEmpty) {
-        // Still empty → truly fresh install with no cloud data → seed defaults
-        _seedData();
-      }
-    } else {
-      // Existing local data — pull cloud in background so UI isn't blocked
+      _seedData();
+    }
+
+    // Register lifecycle observer (sync on app resume)
+    WidgetsBinding.instance.addObserver(this);
+
+    // Start periodic sync timer (every 30s)
+    _startPeriodicSync();
+  }
+
+  // ── App lifecycle: sync when app comes back to foreground ─────────────────
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      SyncService.resetAvailability();
       _syncFromCloud();
     }
   }
 
+  // ── Periodic sync timer ───────────────────────────────────────────────────
+  void _startPeriodicSync() {
+    _syncTimer?.cancel();
+    _syncTimer = Timer.periodic(_syncInterval, (_) {
+      _syncFromCloud();
+    });
+  }
+
+  void _stopPeriodicSync() {
+    _syncTimer?.cancel();
+    _syncTimer = null;
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _stopPeriodicSync();
+    super.dispose();
+  }
+
   // ─── Cloud sync: pull all remote data and merge into local Hive ──────────
   Future<void> _syncFromCloud() async {
+    // Prevent concurrent syncs (avoid race conditions)
+    if (_syncInProgress) return;
+    _syncInProgress = true;
     try {
       final remote = await SyncService.pullAll();
-      // remote.isEmpty means KV binding not configured → silently skip
-      // but we still call _loadAll so in-memory lists reflect Hive state
-      if (remote.isEmpty) {
-        _loadAll();
-        notifyListeners();
-        return;
-      }
 
+      // ALWAYS process results and reload — empty remote just means no
+      // cloud records for that collection yet. Local Hive data is preserved.
       int mergedCount = 0;
 
-      // ── Merge users (remote is authoritative for existing IDs) ────────────
+      // ── Merge users (remote is authoritative) ─────────────────────────────
       final remoteUsers = remote[SyncService.kUsers] ?? [];
       for (final raw in remoteUsers) {
         try {
@@ -451,18 +486,22 @@ RLA CRM Platform
       // Always reload + notify so UI reflects latest merged state
       _loadAll();
       notifyListeners();
+
       if (kDebugMode) {
-        debugPrint('✅ AppState: cloud sync complete — '
+        debugPrint('✅ AppState sync: '
             '${remoteUsers.length} users, '
             '${remoteLeads.length} leads, '
-            '${remoteProjects.length} projects '
-            '($mergedCount records merged)');
+            '${remoteProjects.length} projects, '
+            '${remoteApprovals.length} approvals '
+            '($mergedCount merged | local total: ${_users.length} users)');
       }
     } catch (e) {
       if (kDebugMode) debugPrint('⚠️ AppState._syncFromCloud: $e');
       // Still reload so in-memory lists reflect current Hive state
       _loadAll();
       notifyListeners();
+    } finally {
+      _syncInProgress = false;
     }
   }
 
