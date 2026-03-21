@@ -161,21 +161,35 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       myNotifications.where((n) => !n.isRead).length;
 
   // ─── Analytics ────────────────────────────────────────────────────────────
+  // All analytics use myLeads / myProjects so they are automatically scoped:
+  //   Master Admin  → all leads / all projects
+  //   Project Admin → only their company's leads / projects
+  //   Sales         → only leads assigned to them
+
   Map<LeadStatus, int> get leadsByStatus {
-    final src = isAdmin ? companyLeads : myLeads;
+    final src = myLeads;
     final map = <LeadStatus, int>{};
-    for (final s in LeadStatus.values) { map[s] = src.where((l) => l.status == s).length; }
+    for (final s in LeadStatus.values) {
+      map[s] = src.where((l) => l.status == s).length;
+    }
     return map;
   }
 
   double get conversionRate {
-    final src = isAdmin ? companyLeads : myLeads;
+    final src = myLeads;
     if (src.isEmpty) return 0.0;
     return (src.where((l) => l.status == LeadStatus.closed).length / src.length) * 100;
   }
 
+  /// Total revenue from closed leads (with closedValue set), scoped to role.
+  double get closedLeadsRevenue {
+    return myLeads
+        .where((l) => l.status == LeadStatus.closed && l.closedValue != null)
+        .fold(0.0, (sum, l) => sum + l.closedValue!);
+  }
+
   List<Lead> get recentLeads {
-    final src = isAdmin ? companyLeads : myLeads;
+    final src = myLeads;
     final sorted = List<Lead>.from(src)..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
     return sorted.take(5).toList();
   }
@@ -187,28 +201,28 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   List<Lead> get todaysLeads {
     final today = DateTime.now();
-    return companyLeads.where((l) =>
+    return myLeads.where((l) =>
         l.createdAt.year == today.year &&
         l.createdAt.month == today.month &&
         l.createdAt.day == today.day).toList();
   }
 
   List<Lead> get upcomingSiteVisits {
-    return companyLeads.where((l) =>
+    return myLeads.where((l) =>
         l.status == LeadStatus.siteVisit &&
         l.siteVisitDate != null &&
         l.siteVisitDate!.isNotEmpty).toList();
   }
 
   List<Lead> get pendingFollowUps {
-    return companyLeads.where((l) =>
+    return myLeads.where((l) =>
         l.followUpDate != null && l.followUpDate!.isNotEmpty).toList();
   }
 
   Map<String, Map<String, int>> get projectStats {
     final map = <String, Map<String, int>>{};
-    for (final p in companyProjects) {
-      final pLeads = companyLeads.where((l) => l.projectId == p.id);
+    for (final p in myProjects) {
+      final pLeads = myLeads.where((l) => l.projectId == p.id);
       map[p.id] = {
         'total': pLeads.length,
         'closed': pLeads.where((l) => l.status == LeadStatus.closed).length,
@@ -230,13 +244,20 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     return (totalAllClosures / _leads.length) * 100;
   }
 
-  /// Returns per-project stats including admin info. No Company dependency.
+  /// Total revenue across ALL projects (master admin view).
+  double get totalAllRevenue => _leads
+      .where((l) => l.status == LeadStatus.closed && l.closedValue != null)
+      .fold(0.0, (sum, l) => sum + l.closedValue!);
+
+  /// Returns per-project stats including admin info and revenue.
   Map<String, Map<String, dynamic>> get allProjectsStats {
     final map = <String, Map<String, dynamic>>{};
     for (final p in _projects) {
       final pLeads = _leads.where((l) => l.projectId == p.id).toList();
-      final closed = pLeads.where((l) => l.status == LeadStatus.closed).length;
-      // Find project admin
+      final closedLeads = pLeads.where((l) => l.status == LeadStatus.closed).toList();
+      final revenue = closedLeads
+          .where((l) => l.closedValue != null)
+          .fold(0.0, (double sum, l) => sum + l.closedValue!);
       String adminName = 'No admin assigned';
       try {
         final admin = _users.firstWhere(
@@ -248,10 +269,11 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         'project': p,
         'adminName': adminName,
         'totalLeads': pLeads.length,
-        'closed': closed,
+        'closed': closedLeads.length,
         'siteVisit': pLeads.where((l) => l.status == LeadStatus.siteVisit).length,
         'newLeads': pLeads.where((l) => l.status == LeadStatus.newLead).length,
-        'conversionRate': pLeads.isEmpty ? 0.0 : (closed / pLeads.length) * 100,
+        'conversionRate': pLeads.isEmpty ? 0.0 : (closedLeads.length / pLeads.length) * 100,
+        'revenue': revenue,
       };
     }
     return map;

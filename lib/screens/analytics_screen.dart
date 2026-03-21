@@ -21,7 +21,8 @@ class AnalyticsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
-    final leads = state.isAdmin ? state.companyLeads : state.myLeads;
+    // Scoped leads: project admins see only their project's leads
+    final leads = state.myLeads;
     final byStatus = state.leadsByStatus;
     final total = leads.length;
     final closed = byStatus[LeadStatus.closed] ?? 0;
@@ -29,6 +30,22 @@ class AnalyticsScreen extends StatelessWidget {
     final negotiation = byStatus[LeadStatus.negotiation] ?? 0;
     final lost = byStatus[LeadStatus.lost] ?? 0;
     final conversionRate = total > 0 ? (closed / total * 100) : 0.0;
+    final revenue = state.closedLeadsRevenue;
+
+    // Title: show project name for project admins, platform for master admin
+    final String analyticsTitle;
+    if (state.isMasterAdmin) {
+      analyticsTitle = 'Platform Overview';
+    } else {
+      final myProjects = state.myProjects;
+      if (myProjects.length == 1) {
+        analyticsTitle = myProjects.first.name;
+      } else if (myProjects.isNotEmpty) {
+        analyticsTitle = '${myProjects.length} Projects';
+      } else {
+        analyticsTitle = state.currentUser?.companyName ?? 'My Projects';
+      }
+    }
 
     // Lead source breakdown
     final sourceMap = <LeadSource, int>{};
@@ -69,7 +86,7 @@ class AnalyticsScreen extends StatelessWidget {
                               fontWeight: FontWeight.w800,
                               color: AppColors.textPrimary)),
                       Text(
-                          '${state.currentCompany?.name ?? 'Company'} performance overview',
+                          '$analyticsTitle performance overview',
                           style: GoogleFonts.inter(
                               fontSize: 13, color: AppColors.textMuted)),
                     ],
@@ -129,7 +146,43 @@ class AnalyticsScreen extends StatelessWidget {
                 ],
               );
             }),
-            const SizedBox(height: 24),
+            const SizedBox(height: 16),
+            // Revenue banner for closed deals
+            if (revenue > 0) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  gradient: AppColors.gradientSuccess,
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [BoxShadow(color: const Color(0xFF34C77B).withValues(alpha: 0.3), blurRadius: 12, offset: const Offset(0, 4))],
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.monetization_on_rounded, color: Colors.white70, size: 28),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Total Closed Revenue', style: GoogleFonts.inter(fontSize: 11, color: Colors.white70, fontWeight: FontWeight.w500)),
+                          Text(_fmtRevenue(revenue), style: GoogleFonts.inter(fontSize: 22, fontWeight: FontWeight.w800, color: Colors.white)),
+                        ],
+                      ),
+                    ),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text('$closed deals', style: GoogleFonts.inter(fontSize: 11, color: Colors.white70)),
+                        Text('${conversionRate.toStringAsFixed(1)}% conv.', style: GoogleFonts.inter(fontSize: 11, color: Colors.white70)),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+            const SizedBox(height: 8),
 
             // Pipeline breakdown
             Text('Pipeline Breakdown',
@@ -387,6 +440,12 @@ class AnalyticsScreen extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  String _fmtRevenue(double v) {
+    if (v >= 10000000) return '₹${(v / 10000000).toStringAsFixed(2)}Cr';
+    if (v >= 100000) return '₹${(v / 100000).toStringAsFixed(2)}L';
+    return '₹${v.toStringAsFixed(0)}';
   }
 }
 

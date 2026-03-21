@@ -24,10 +24,12 @@ class _AddEditLeadScreenState extends State<AddEditLeadScreen> {
   late TextEditingController _notesCtrl;
   late TextEditingController _siteVisitCtrl;
   late TextEditingController _followUpCtrl;
+  late TextEditingController _closedValueCtrl;
 
   PropertyType _propertyType = PropertyType.apartment;
   LeadSource _source = LeadSource.walkin;
   LeadStatus _status = LeadStatus.newLead;
+  LeadType _leadType = LeadType.sale;
   String? _assignedToId;
   String? _assignedToName;
   String? _selectedProjectId;
@@ -51,10 +53,12 @@ class _AddEditLeadScreenState extends State<AddEditLeadScreen> {
     _notesCtrl = TextEditingController(text: l?.notes ?? '');
     _siteVisitCtrl = TextEditingController(text: l?.siteVisitDate ?? '');
     _followUpCtrl = TextEditingController(text: l?.followUpDate ?? '');
+    _closedValueCtrl = TextEditingController(text: l?.closedValue?.toStringAsFixed(0) ?? '');
     if (l != null) {
       _propertyType = l.propertyType;
       _source = l.source;
       _status = l.status;
+      _leadType = l.leadType;
       _assignedToId = l.assignedToId;
       _assignedToName = l.assignedToName;
       _selectedProjectId = l.projectId;
@@ -64,7 +68,7 @@ class _AddEditLeadScreenState extends State<AddEditLeadScreen> {
 
   @override
   void dispose() {
-    for (final c in [_nameCtrl, _phoneCtrl, _emailCtrl, _budgetMinCtrl, _budgetMaxCtrl, _notesCtrl, _siteVisitCtrl, _followUpCtrl]) {
+    for (final c in [_nameCtrl, _phoneCtrl, _emailCtrl, _budgetMinCtrl, _budgetMaxCtrl, _notesCtrl, _siteVisitCtrl, _followUpCtrl, _closedValueCtrl]) {
       c.dispose();
     }
     _pageCtrl.dispose();
@@ -259,11 +263,15 @@ class _AddEditLeadScreenState extends State<AddEditLeadScreen> {
       prev.budgetMax = double.tryParse(_budgetMaxCtrl.text);
       prev.source = _source;
       prev.status = _status;
+      prev.leadType = _leadType;
       prev.assignedToId = assignId;
       prev.assignedToName = assignName;
       prev.notes = _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim();
       prev.siteVisitDate = _siteVisitCtrl.text.trim().isEmpty ? null : _siteVisitCtrl.text.trim();
       prev.followUpDate = _followUpCtrl.text.trim().isEmpty ? null : _followUpCtrl.text.trim();
+      prev.closedValue = _status == LeadStatus.closed
+          ? double.tryParse(_closedValueCtrl.text)
+          : prev.closedValue;
       state.updateLead(prev);
       if (mounted) Navigator.pop(context, prev);
     } else {
@@ -278,6 +286,7 @@ class _AddEditLeadScreenState extends State<AddEditLeadScreen> {
         budgetMax: double.tryParse(_budgetMaxCtrl.text),
         source: _source,
         status: _status,
+        leadType: _leadType,
         assignedToId: assignId,
         assignedToName: assignName,
         notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
@@ -286,6 +295,9 @@ class _AddEditLeadScreenState extends State<AddEditLeadScreen> {
         createdById: currentUser.id,
         createdByName: currentUser.name,
         companyId: state.currentCompanyId ?? '',
+        closedValue: _status == LeadStatus.closed
+            ? double.tryParse(_closedValueCtrl.text)
+            : null,
       );
       state.addLead(lead);
       if (mounted) Navigator.pop(context);
@@ -377,6 +389,64 @@ class _AddEditLeadScreenState extends State<AddEditLeadScreen> {
                       );
                     }).toList(),
                   ),
+            const SizedBox(height: 14),
+            // ── Lead Type (Sale / Lease) ──────────────────────────────────
+            Text('Lead Type', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+            const SizedBox(height: 8),
+            Row(
+              children: LeadType.values.map((t) {
+                final isActive = _leadType == t;
+                return Expanded(
+                  child: Padding(
+                    padding: EdgeInsets.only(right: t == LeadType.sale ? 8 : 0),
+                    child: GestureDetector(
+                      onTap: () => setState(() => _leadType = t),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        decoration: BoxDecoration(
+                          gradient: isActive
+                              ? (t == LeadType.sale
+                                  ? AppColors.gradientPrimary
+                                  : AppColors.gradientSecondary)
+                              : null,
+                          color: isActive ? null : AppColors.surface,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: isActive
+                                ? Colors.transparent
+                                : AppColors.border,
+                            width: 1.5,
+                          ),
+                          boxShadow: isActive
+                              ? [BoxShadow(color: t.color.withValues(alpha: 0.25), blurRadius: 8, offset: const Offset(0, 3))]
+                              : [],
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              t == LeadType.sale ? Icons.sell_rounded : Icons.key_rounded,
+                              size: 15,
+                              color: isActive ? Colors.white : AppColors.textMuted,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              t.shortLabel,
+                              style: GoogleFonts.inter(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                                color: isActive ? Colors.white : AppColors.textSecondary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
             const SizedBox(height: 14),
             // Property Type
             Text('Property Type', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
@@ -502,6 +572,38 @@ class _AddEditLeadScreenState extends State<AddEditLeadScreen> {
                 }).toList(),
               ),
             ],
+            // ── Closed Deal Value — shown only when status = Closed ──────────
+            if (_status == LeadStatus.closed) ...
+              [
+                const SizedBox(height: 14),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFB8FFE4).withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFF34C77B).withValues(alpha: 0.35)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.monetization_on_rounded, size: 15, color: Color(0xFF34C77B)),
+                          const SizedBox(width: 6),
+                          Text('Closed Deal Value',
+                              style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w700, color: const Color(0xFF34C77B))),
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      Text('Enter the actual sale value for this deal',
+                          style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted)),
+                      const SizedBox(height: 10),
+                      _field(_closedValueCtrl, 'Deal Value (₹)', Icons.currency_rupee_rounded,
+                          type: TextInputType.number),
+                    ],
+                  ),
+                ),
+              ],
             const SizedBox(height: 14),
             _field(_siteVisitCtrl, 'Site Visit Date', Icons.calendar_today_outlined),
             const SizedBox(height: 12),

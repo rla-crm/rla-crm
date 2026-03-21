@@ -6,6 +6,7 @@ import '../core/models.dart';
 import '../core/theme.dart';
 import '../widgets/common_widgets.dart';
 import 'report_screen.dart';
+import 'lead_list_screen.dart';
 
 // ─── Master Admin Dashboard ───────────────────────────────────────────────────
 class MasterAdminDashboard extends StatefulWidget {
@@ -978,6 +979,7 @@ class _MasterAnalyticsScreen extends StatelessWidget {
     final totalLeads = state.totalAllLeads;
     final totalClosures = state.totalAllClosures;
     final conversionRate = state.overallConversionRate;
+    final totalRevenue = state.totalAllRevenue;
 
     return SafeArea(
       child: SingleChildScrollView(
@@ -1005,6 +1007,8 @@ class _MasterAnalyticsScreen extends StatelessWidget {
                   _kpiCard('Conv. Rate', '${conversionRate.toStringAsFixed(1)}%', Icons.donut_large_rounded, AppColors.gradientCTA),
                   _kpiCard('Projects', state.projects.length.toString(), Icons.apartment_outlined, AppColors.gradientPrimary),
                   _kpiCard('Users', state.totalAllUsers.toString(), Icons.people_outline_rounded, const LinearGradient(colors: [AppColors.sky, AppColors.teal])),
+                  if (totalRevenue > 0)
+                    _kpiCard('Revenue', _fmtRev(totalRevenue), Icons.monetization_on_outlined, AppColors.gradientSuccess),
                 ],
               );
             }),
@@ -1145,6 +1149,10 @@ class _MasterAnalyticsScreen extends StatelessWidget {
                             _statCol('Closed', '$closed', const Color(0xFF3B8A6E)),
                             _divider(),
                             _statCol('Conv.', '${rate.toStringAsFixed(0)}%', const Color(0xFF5B3FBF)),
+                            if ((data['revenue'] as double) > 0) ...[
+                              _divider(),
+                              _statCol(_fmtRev(data['revenue'] as double), 'Revenue', const Color(0xFFD08020)),
+                            ],
                           ],
                         ),
                       ),
@@ -1189,6 +1197,12 @@ class _MasterAnalyticsScreen extends StatelessWidget {
   }
 
   Widget _divider() => Container(width: 1, height: 28, color: AppColors.border);
+
+  String _fmtRev(double v) {
+    if (v >= 10000000) return '₹${(v / 10000000).toStringAsFixed(1)}Cr';
+    if (v >= 100000) return '₹${(v / 100000).toStringAsFixed(1)}L';
+    return '₹${v.toStringAsFixed(0)}';
+  }
 }
 
 
@@ -1883,6 +1897,183 @@ class _MasterProjectsScreen extends StatefulWidget {
 class _MasterProjectsScreenState extends State<_MasterProjectsScreen> {
   String _search = '';
 
+  // Mini stat badge helper
+  Widget _miniStat(String value, String label, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withValues(alpha: 0.25)),
+      ),
+      child: RichText(
+        text: TextSpan(
+          children: [
+            TextSpan(text: value, style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w700, color: color)),
+            TextSpan(text: ' $label', style: GoogleFonts.inter(fontSize: 9, color: AppColors.textMuted)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Navigate to leads screen filtered by project
+  void _navigateToLeads(BuildContext context, RealEstateProject p) {
+    Navigator.push(
+      context,
+      PageRouteBuilder(
+        pageBuilder: (_, a, b) => LeadListScreen(showBackButton: true, projectFilter: p.name),
+        transitionsBuilder: (_, a, b, child) => SlideTransition(
+          position: Tween<Offset>(begin: const Offset(1, 0), end: Offset.zero)
+              .animate(CurvedAnimation(parent: a, curve: Curves.easeOutCubic)),
+          child: child,
+        ),
+      ),
+    );
+  }
+
+  // Show project detail sheet with full stats and leads button
+  void _showProjectDetailSheet(BuildContext context, AppState state, RealEstateProject p, List<Lead> leads, String adminName) {
+    final closed = leads.where((l) => l.status == LeadStatus.closed).length;
+    final siteVisit = leads.where((l) => l.status == LeadStatus.siteVisit).length;
+    final newLeads = leads.where((l) => l.status == LeadStatus.newLead).length;
+    final revenue = leads
+        .where((l) => l.status == LeadStatus.closed && l.closedValue != null)
+        .fold<double>(0, (sum, l) => sum + l.closedValue!);
+    final rate = leads.isNotEmpty ? (closed / leads.length * 100) : 0.0;
+    String fmt(double v) {
+      if (v >= 10000000) return '₹${(v / 10000000).toStringAsFixed(1)}Cr';
+      if (v >= 100000) return '₹${(v / 100000).toStringAsFixed(1)}L';
+      return '₹${v.toStringAsFixed(0)}';
+    }
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        height: MediaQuery.of(context).size.height * 0.75,
+        decoration: const BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          children: [
+            // Handle bar
+            Container(margin: const EdgeInsets.only(top: 10), width: 36, height: 4, decoration: BoxDecoration(color: AppColors.border, borderRadius: BorderRadius.circular(2))),
+            // Header
+            Container(
+              margin: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(gradient: AppColors.gradientPrimary, borderRadius: BorderRadius.circular(16)),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: [
+                    Expanded(child: Text(p.name, style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.textPrimary))),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(8)),
+                      child: Text(p.status.label, style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                    ),
+                  ]),
+                  const SizedBox(height: 4),
+                  Row(children: [
+                    const Icon(Icons.location_on_outlined, size: 13, color: AppColors.textSecondary),
+                    const SizedBox(width: 4),
+                    Text(p.location, style: GoogleFonts.inter(fontSize: 12, color: AppColors.textSecondary)),
+                  ]),
+                  if (p.developerName.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Row(children: [
+                      const Icon(Icons.business_outlined, size: 13, color: AppColors.textSecondary),
+                      const SizedBox(width: 4),
+                      Text(p.developerName, style: GoogleFonts.inter(fontSize: 12, color: AppColors.textSecondary)),
+                    ]),
+                  ],
+                  const SizedBox(height: 10),
+                  Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
+                    _detailStat('${leads.length}', 'Total'),
+                    _vLine(),
+                    _detailStat('$newLeads', 'New'),
+                    _vLine(),
+                    _detailStat('$siteVisit', 'Site Visits'),
+                    _vLine(),
+                    _detailStat('$closed', 'Closed'),
+                    _vLine(),
+                    _detailStat('${rate.toStringAsFixed(0)}%', 'Conv.'),
+                  ]),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            // Admin info
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Row(children: [
+                const Icon(Icons.admin_panel_settings_outlined, size: 15, color: AppColors.textMuted),
+                const SizedBox(width: 8),
+                Text('Project Admin: ', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted)),
+                Text(adminName, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+              ]),
+            ),
+            if (revenue > 0) ...[
+              const SizedBox(height: 8),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Row(children: [
+                  const Icon(Icons.monetization_on_outlined, size: 15, color: Color(0xFF34C77B)),
+                  const SizedBox(width: 8),
+                  Text('Closed Revenue: ', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted)),
+                  Text(fmt(revenue), style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: const Color(0xFF34C77B))),
+                ]),
+              ),
+            ],
+            const SizedBox(height: 16),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Row(children: [
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () {
+                      Navigator.pop(context);
+                      _navigateToLeads(context, p);
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 13),
+                      decoration: BoxDecoration(gradient: AppColors.gradientCTA, borderRadius: BorderRadius.circular(14)),
+                      child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                        const Icon(Icons.people_alt_outlined, size: 16, color: Colors.white),
+                        const SizedBox(width: 8),
+                        Text('View All Leads (${leads.length})', style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white)),
+                      ]),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                GestureDetector(
+                  onTap: () { Navigator.pop(context); _showProjectSheet(context, state, p); },
+                  child: Container(
+                    width: 46, height: 46,
+                    decoration: BoxDecoration(color: AppColors.lavender.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.lavender.withValues(alpha: 0.3))),
+                    child: const Icon(Icons.edit_outlined, size: 18, color: AppColors.lavender),
+                  ),
+                ),
+              ]),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _detailStat(String value, String label) => Column(children: [
+    Text(value, style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+    Text(label, style: GoogleFonts.inter(fontSize: 9, color: AppColors.textSecondary)),
+  ]);
+
+  Widget _vLine() => Container(width: 1, height: 28, color: AppColors.textPrimary.withValues(alpha: 0.15));
+
   // Helper: get the project admin name for a given project
   String _projectAdminName(AppState state, String projectId) {
     try {
@@ -2115,59 +2306,90 @@ class _MasterProjectsScreenState extends State<_MasterProjectsScreen> {
                       // Find admin for this project
                       final adminName = _projectAdminName(state, p.id);
                       final leads = state.leads.where((l) => l.projectId == p.id).toList();
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 12),
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: AppColors.surface,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: AppColors.border),
-                          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 8, offset: const Offset(0, 2))],
-                        ),
-                        child: Row(
-                          children: [
-                            Container(width: 44, height: 44, decoration: BoxDecoration(gradient: AppColors.gradientPrimary, borderRadius: BorderRadius.circular(12)),
-                              child: Center(child: Text(p.name.isNotEmpty ? p.name[0].toUpperCase() : 'P',
-                                  style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white)))),
-                            const SizedBox(width: 14),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                      final closedCount = leads.where((l) => l.status == LeadStatus.closed).length;
+                      final revenue = leads
+                          .where((l) => l.status == LeadStatus.closed && l.closedValue != null)
+                          .fold<double>(0, (sum, l) => sum + l.closedValue!);
+                      String fmtR(double v) {
+                        if (v >= 10000000) return '₹${(v / 10000000).toStringAsFixed(1)}Cr';
+                        if (v >= 100000) return '₹${(v / 100000).toStringAsFixed(1)}L';
+                        return '₹${v.toStringAsFixed(0)}';
+                      }
+                      return GestureDetector(
+                        onTap: () => _showProjectDetailSheet(context, state, p, leads, adminName),
+                        child: Container(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: AppColors.surface,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: AppColors.border),
+                            boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 8, offset: const Offset(0, 2))],
+                          ),
+                          child: Row(
+                            children: [
+                              Container(width: 44, height: 44, decoration: BoxDecoration(gradient: AppColors.gradientPrimary, borderRadius: BorderRadius.circular(12)),
+                                child: Center(child: Text(p.name.isNotEmpty ? p.name[0].toUpperCase() : 'P',
+                                    style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white)))),
+                              const SizedBox(width: 14),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(p.name, style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                                    const SizedBox(height: 2),
+                                    Row(children: [
+                                      const Icon(Icons.person_outline_rounded, size: 12, color: AppColors.textMuted),
+                                      const SizedBox(width: 4),
+                                      Text(adminName, style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted)),
+                                    ]),
+                                    const SizedBox(height: 3),
+                                    Row(children: [
+                                      const Icon(Icons.location_on_outlined, size: 12, color: AppColors.textMuted),
+                                      const SizedBox(width: 4),
+                                      Expanded(child: Text(p.location, style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                                    ]),
+                                    const SizedBox(height: 4),
+                                    Row(children: [
+                                      _miniStat('${leads.length}', 'Leads', AppColors.lavender),
+                                      const SizedBox(width: 10),
+                                      _miniStat('$closedCount', 'Closed', const Color(0xFF34C77B)),
+                                      if (revenue > 0) ...[
+                                        const SizedBox(width: 10),
+                                        _miniStat(fmtR(revenue), 'Revenue', AppColors.peach),
+                                      ],
+                                    ]),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.end,
                                 children: [
-                                  Text(p.name, style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                                  const SizedBox(height: 2),
+                                  Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(color: p.status.color.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(6)),
+                                    child: Text(p.status.label, style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w600, color: AppColors.textPrimary))),
+                                  const SizedBox(height: 6),
                                   Row(children: [
-                                    const Icon(Icons.person_outline_rounded, size: 12, color: AppColors.textMuted),
-                                    const SizedBox(width: 4),
-                                    Text(adminName, style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted)),
-                                  ]),
-                                  const SizedBox(height: 4),
-                                  Row(children: [
-                                    const Icon(Icons.location_on_outlined, size: 12, color: AppColors.textMuted),
-                                    const SizedBox(width: 4),
-                                    Expanded(child: Text(p.location, style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                                    GestureDetector(
+                                      onTap: () => _navigateToLeads(context, p),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                        decoration: BoxDecoration(gradient: AppColors.gradientCTA, borderRadius: BorderRadius.circular(8)),
+                                        child: Text('Leads', style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    GestureDetector(
+                                      onTap: () => _showProjectSheet(context, state, p),
+                                      child: Container(width: 28, height: 28, decoration: BoxDecoration(color: AppColors.lavender.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(8)),
+                                        child: const Icon(Icons.edit_outlined, size: 14, color: AppColors.lavender)),
+                                    ),
                                   ]),
                                 ],
                               ),
-                            ),
-                            const SizedBox(width: 12),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: [
-                                Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                  decoration: BoxDecoration(color: p.status.color.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(6)),
-                                  child: Text(p.status.label, style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w600, color: AppColors.textPrimary))),
-                                const SizedBox(height: 4),
-                                Text('${leads.length} leads', style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted)),
-                                const SizedBox(height: 4),
-                                GestureDetector(
-                                  onTap: () => _showProjectSheet(context, state, p),
-                                  child: Container(width: 28, height: 28, decoration: BoxDecoration(color: AppColors.lavender.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(8)),
-                                    child: const Icon(Icons.edit_outlined, size: 14, color: AppColors.lavender)),
-                                ),
-                              ],
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       );
                     },

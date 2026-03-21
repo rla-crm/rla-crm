@@ -17,6 +17,30 @@ enum PropertyType {
   apartment, villa, plot, commercial, penthouse, studio, other
 }
 
+/// Whether the lead is for a Sale or a Lease/Rental deal.
+enum LeadType { sale, lease }
+
+extension LeadTypeExt on LeadType {
+  String get label {
+    switch (this) {
+      case LeadType.sale:  return 'Sale';
+      case LeadType.lease: return 'Lease / Rental';
+    }
+  }
+  String get shortLabel {
+    switch (this) {
+      case LeadType.sale:  return 'Sale';
+      case LeadType.lease: return 'Lease';
+    }
+  }
+  Color get color {
+    switch (this) {
+      case LeadType.sale:  return const Color(0xFF7C6FFF); // lavender
+      case LeadType.lease: return const Color(0xFFFF9F7C); // orange
+    }
+  }
+}
+
 enum NotificationPriority { low, medium, high }
 
 enum ProjectStatus { active, onHold, completed }
@@ -486,6 +510,11 @@ class Lead {
   final String createdByName;
   List<LeadActivity> activities;
   final String companyId;
+  /// Actual deal value recorded when the lead is marked as Closed.
+  double? closedValue;
+  /// Whether this lead is for a Sale or a Lease/Rental.
+  /// Defaults to sale for all existing leads (backward-compatible).
+  LeadType leadType;
 
   Lead({
     String? id,
@@ -510,6 +539,8 @@ class Lead {
     required this.createdByName,
     List<LeadActivity>? activities,
     required this.companyId,
+    this.closedValue,
+    this.leadType = LeadType.sale,
   })  : id = id ?? _uuid.v4(),
         createdAt = createdAt ?? DateTime.now(),
         updatedAt = updatedAt ?? DateTime.now(),
@@ -519,6 +550,12 @@ class Lead {
     final parts = name.trim().split(' ');
     if (parts.length >= 2) return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
     return name.isNotEmpty ? name[0].toUpperCase() : '?';
+  }
+
+  /// Display string for the closed deal value
+  String get closedValueDisplay {
+    if (closedValue == null) return 'Value N/A';
+    return _fmt(closedValue!);
   }
 
   String get budgetDisplay {
@@ -547,6 +584,8 @@ class Lead {
         'createdById': createdById, 'createdByName': createdByName,
         'activities': activities.map((a) => a.toMap()).toList(),
         'companyId': companyId,
+        'closedValue': closedValue,
+        'leadType': leadType.index,
       };
 
   factory Lead.fromMap(Map<String, dynamic> map) => Lead(
@@ -569,6 +608,8 @@ class Lead {
         createdByName: map['createdByName'] ?? '',
         activities: (map['activities'] as List?)?.map((a) => LeadActivity.fromMap(a)).toList() ?? [],
         companyId: map['companyId'] ?? '',
+        closedValue: map['closedValue']?.toDouble(),
+        leadType: LeadType.values[map['leadType'] ?? 0],
       );
 }
 
