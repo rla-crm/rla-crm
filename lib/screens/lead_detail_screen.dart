@@ -93,6 +93,22 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> with TickerProvider
               const Spacer(),
               const RlaBrand(size: 13),
               const Spacer(),
+              // ── Delete button (admin only) ─────────────────────────────────
+              if (state.isAdmin)
+                GestureDetector(
+                  onTap: () => _confirmDelete(context, state),
+                  child: Container(
+                    width: 36, height: 36,
+                    margin: const EdgeInsets.only(right: 8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFEEF0),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: const Color(0xFFFFCDD2)),
+                    ),
+                    child: const Icon(Icons.delete_outline_rounded, size: 18, color: Color(0xFFD04060)),
+                  ),
+                ),
+              // ── Edit button (admin or assigned sales) ──────────────────────
               if (state.isAdmin || _lead.assignedToId == state.currentUser?.id)
                 GestureDetector(
                   onTap: () async {
@@ -170,6 +186,95 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> with TickerProvider
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  // ── Delete confirmation dialog ──────────────────────────────────────────────
+  void _confirmDelete(BuildContext context, AppState state) {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        backgroundColor: AppColors.background,
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Icon
+              Container(
+                width: 56, height: 56,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFEEF0),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: const Color(0xFFFFCDD2)),
+                ),
+                child: const Icon(Icons.delete_outline_rounded, size: 28, color: Color(0xFFD04060)),
+              ),
+              const SizedBox(height: 16),
+              Text('Delete Lead?',
+                  style: GoogleFonts.inter(fontSize: 17, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+              const SizedBox(height: 8),
+              Text(
+                'Are you sure you want to permanently delete "${_lead.name}"? This action cannot be undone.',
+                style: GoogleFonts.inter(fontSize: 13, color: AppColors.textSecondary, height: 1.5),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 20),
+              Row(children: [
+                // Cancel
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => Navigator.pop(ctx),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      decoration: BoxDecoration(
+                        color: AppColors.surface,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: AppColors.border),
+                      ),
+                      child: Center(child: Text('Cancel',
+                          style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textSecondary))),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                // Delete
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () {
+                      Navigator.pop(ctx);           // close dialog
+                      state.deleteLead(_lead.id);   // delete from Hive + cloud sync
+                      Navigator.pop(context);        // go back to leads list
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Row(children: [
+                          const Icon(Icons.check_circle_outline_rounded, size: 16, color: Colors.white),
+                          const SizedBox(width: 8),
+                          Text('Lead "${_lead.name}" deleted', style: GoogleFonts.inter(fontSize: 12, color: Colors.white)),
+                        ]),
+                        backgroundColor: const Color(0xFFD04060),
+                        behavior: SnackBarBehavior.floating,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        duration: const Duration(seconds: 3),
+                      ));
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFD04060),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Center(child: Text('Delete',
+                          style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white))),
+                    ),
+                  ),
+                ),
+              ]),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -336,6 +441,8 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> with TickerProvider
                 Icons.call_rounded, 'Call',
                 AppColors.gradientSuccess,
                 () => _doContact(context, state, 'call'),
+                iconColor: Colors.white,
+                labelColor: Colors.white,
               )),
               const SizedBox(width: 8),
               Expanded(child: _actionTile(
@@ -481,14 +588,25 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> with TickerProvider
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         if (isActive) ...[
-                          const Icon(Icons.check_circle_rounded, size: 12, color: AppColors.textPrimary),
+                          Icon(Icons.check_circle_rounded,
+                            size: 12,
+                            color: (isActive && (s == LeadStatus.closed || s == LeadStatus.lost))
+                                ? (s == LeadStatus.closed ? Colors.white : AppColors.textSecondary)
+                                : AppColors.textPrimary,
+                          ),
                           const SizedBox(width: 4),
                         ],
                         Text(s.label,
                           style: GoogleFonts.inter(
                             fontSize: 12,
                             fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
-                            color: isActive ? AppColors.textPrimary : _darken(s.color),
+                            color: isActive
+                                ? (s == LeadStatus.closed
+                                    ? Colors.white
+                                    : s == LeadStatus.lost
+                                        ? AppColors.textSecondary
+                                        : AppColors.textPrimary)
+                                : _darken(s.color),
                           ),
                         ),
                       ],
@@ -683,7 +801,7 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> with TickerProvider
                         children: [
                           Container(
                             width: 10, height: 10,
-                            decoration: BoxDecoration(
+                          decoration: const BoxDecoration(
                               gradient: AppColors.gradientCTA,
                               shape: BoxShape.circle,
                             ),
@@ -742,7 +860,7 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> with TickerProvider
     return hsl.withLightness((hsl.lightness - 0.25).clamp(0.0, 1.0)).toColor();
   }
 
-  Widget _actionTile(IconData icon, String label, LinearGradient gradient, VoidCallback onTap) {
+  Widget _actionTile(IconData icon, String label, LinearGradient gradient, VoidCallback onTap, {Color? iconColor, Color? labelColor}) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -755,9 +873,9 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> with TickerProvider
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 22, color: AppColors.textPrimary),
+            Icon(icon, size: 22, color: iconColor ?? AppColors.textPrimary),
             const SizedBox(height: 4),
-            Text(label, style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+            Text(label, style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600, color: labelColor ?? AppColors.textPrimary)),
           ],
         ),
       ),

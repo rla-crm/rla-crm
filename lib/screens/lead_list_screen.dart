@@ -250,20 +250,111 @@ class _LeadListScreenState extends State<LeadListScreen>
                   leads: activeLeads,
                   filterStatus: _filterStatus,
                   sortBy: _sortBy,
+                  isAdmin: state.isAdmin,
                   onFilterChanged: (s) => setState(() => _filterStatus = s),
                   onSortChanged: (s) => setState(() => _sortBy = s),
                   onTap: (lead) => Navigator.push(
                       context, _slide(LeadDetailScreen(lead: lead))),
+                  onDelete: (lead) => _deleteLead(context, state, lead),
                 ),
                 _ClosedLeadsTab(
                   leads: closedLeads,
+                  isAdmin: state.isAdmin,
                   onTap: (lead) => Navigator.push(
                       context, _slide(LeadDetailScreen(lead: lead))),
+                  onDelete: (lead) => _deleteLead(context, state, lead),
                 ),
               ],
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  // ── Delete helper — shows confirm bottom sheet, then deletes ─────────────
+  void _deleteLead(BuildContext context, AppState state, Lead lead) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        margin: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
+        decoration: BoxDecoration(
+          color: AppColors.background,
+          borderRadius: BorderRadius.circular(24),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 52, height: 52,
+              decoration: const BoxDecoration(
+                color: Color(0xFFFFEEF0),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.delete_outline_rounded, size: 26, color: Color(0xFFD04060)),
+            ),
+            const SizedBox(height: 14),
+            Text('Delete Lead?',
+                style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+            const SizedBox(height: 8),
+            Text(
+              'Permanently delete "${lead.name}"?\nThis action cannot be undone.',
+              style: GoogleFonts.inter(fontSize: 13, color: AppColors.textSecondary, height: 1.5),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 22),
+            Row(children: [
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => Navigator.pop(context),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                    decoration: BoxDecoration(
+                      color: AppColors.surface,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: Center(child: Text('Cancel',
+                        style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textSecondary))),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: GestureDetector(
+                  onTap: () {
+                    Navigator.pop(context);
+                    state.deleteLead(lead.id);
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Row(children: [
+                        const Icon(Icons.check_circle_outline_rounded, size: 16, color: Colors.white),
+                        const SizedBox(width: 8),
+                        Expanded(child: Text('"${lead.name}" deleted',
+                            style: GoogleFonts.inter(fontSize: 12, color: Colors.white))),
+                      ]),
+                      backgroundColor: const Color(0xFFD04060),
+                      behavior: SnackBarBehavior.floating,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      duration: const Duration(seconds: 3),
+                    ));
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFD04060),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Center(child: Text('Delete',
+                        style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white))),
+                  ),
+                ),
+              ),
+            ]),
+            const SizedBox(height: 8),
+          ],
+        ),
       ),
     );
   }
@@ -287,17 +378,21 @@ class _ActiveLeadsTab extends StatelessWidget {
   final List<Lead> leads;
   final LeadStatus? filterStatus;
   final String sortBy;
+  final bool isAdmin;
   final ValueChanged<LeadStatus?> onFilterChanged;
   final ValueChanged<String> onSortChanged;
   final ValueChanged<Lead> onTap;
+  final ValueChanged<Lead> onDelete;
 
   const _ActiveLeadsTab({
     required this.leads,
     required this.filterStatus,
     required this.sortBy,
+    required this.isAdmin,
     required this.onFilterChanged,
     required this.onSortChanged,
     required this.onTap,
+    required this.onDelete,
   });
 
   @override
@@ -363,11 +458,41 @@ class _ActiveLeadsTab extends StatelessWidget {
               : ListView.builder(
                   padding: const EdgeInsets.symmetric(horizontal: 20),
                   itemCount: leads.length,
-                  itemBuilder: (ctx, idx) => Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: _LeadCard(
-                        lead: leads[idx], onTap: () => onTap(leads[idx])),
-                  ),
+                  itemBuilder: (ctx, idx) {
+                    final lead = leads[idx];
+                    final card = Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: _LeadCard(lead: lead, onTap: () => onTap(lead)),
+                    );
+                    if (!isAdmin) return card;
+                    return Dismissible(
+                      key: ValueKey(lead.id),
+                      direction: DismissDirection.endToStart,
+                      confirmDismiss: (_) async {
+                        onDelete(lead);
+                        return false; // never auto-remove; deletion handled via confirm sheet
+                      },
+                      background: Container(
+                        margin: const EdgeInsets.only(bottom: 10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFEEF0),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: const Color(0xFFFFCDD2)),
+                        ),
+                        alignment: Alignment.centerRight,
+                        padding: const EdgeInsets.only(right: 20),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.delete_outline_rounded, color: Color(0xFFD04060), size: 24),
+                            const SizedBox(height: 4),
+                            Text('Delete', style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w600, color: const Color(0xFFD04060))),
+                          ],
+                        ),
+                      ),
+                      child: card,
+                    );
+                  },
                 ),
         ),
       ],
@@ -439,9 +564,16 @@ class _ActiveLeadsTab extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 class _ClosedLeadsTab extends StatelessWidget {
   final List<Lead> leads;
+  final bool isAdmin;
   final ValueChanged<Lead> onTap;
+  final ValueChanged<Lead> onDelete;
 
-  const _ClosedLeadsTab({required this.leads, required this.onTap});
+  const _ClosedLeadsTab({
+    required this.leads,
+    required this.isAdmin,
+    required this.onTap,
+    required this.onDelete,
+  });
 
   String _fmt(double v) {
     if (v >= 10000000) return '₹${(v / 10000000).toStringAsFixed(2)}Cr';
@@ -586,10 +718,40 @@ class _ClosedLeadsTab extends StatelessWidget {
                       fontWeight: FontWeight.w700,
                       color: AppColors.textPrimary)),
               const SizedBox(height: 8),
-              ...leads.map((l) => Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: _ClosedLeadCard(lead: l, onTap: () => onTap(l)),
-                  )),
+              ...leads.map((l) {
+                final card = Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: _ClosedLeadCard(lead: l, onTap: () => onTap(l)),
+                );
+                if (!isAdmin) return card;
+                return Dismissible(
+                  key: ValueKey('closed_${l.id}'),
+                  direction: DismissDirection.endToStart,
+                  confirmDismiss: (_) async {
+                    onDelete(l);
+                    return false;
+                  },
+                  background: Container(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFEEF0),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: const Color(0xFFFFCDD2)),
+                    ),
+                    alignment: Alignment.centerRight,
+                    padding: const EdgeInsets.only(right: 20),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.delete_outline_rounded, color: Color(0xFFD04060), size: 24),
+                        const SizedBox(height: 4),
+                        Text('Delete', style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w600, color: const Color(0xFFD04060))),
+                      ],
+                    ),
+                  ),
+                  child: card,
+                );
+              }),
             ],
           );
   }
@@ -826,14 +988,14 @@ class _ClosedLeadCard extends StatelessWidget {
                   label: lead.leadType.shortLabel,
                   color: lead.leadType.color),
               const SizedBox(width: 8),
-              Icon(Icons.phone_outlined,
+              const Icon(Icons.phone_outlined,
                   size: 11, color: AppColors.textMuted),
               const SizedBox(width: 4),
               Text(lead.phone,
                   style: GoogleFonts.inter(
                       fontSize: 11, color: AppColors.textMuted)),
               const SizedBox(width: 8),
-              Icon(Icons.home_outlined, size: 11, color: AppColors.textMuted),
+              const Icon(Icons.home_outlined, size: 11, color: AppColors.textMuted),
               const SizedBox(width: 4),
               Expanded(
                 child: Text(lead.propertyType.label,
@@ -919,7 +1081,7 @@ class _LeadCard extends StatelessWidget {
               _TypeBadge(
                   label: lead.leadType.shortLabel, color: lead.leadType.color),
               const SizedBox(width: 8),
-              Icon(Icons.phone_outlined,
+              const Icon(Icons.phone_outlined,
                   size: 11, color: AppColors.textMuted),
               const SizedBox(width: 4),
               Text(lead.phone,
