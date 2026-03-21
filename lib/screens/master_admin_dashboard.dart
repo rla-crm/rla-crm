@@ -903,7 +903,7 @@ class _ApprovalCard extends StatelessWidget {
                         gradient: AppColors.gradientSuccess,
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      child: Text('Approve', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                      child: Text('Approve', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white)),
                     ),
                   ),
                 ],
@@ -2022,10 +2022,10 @@ class _MasterProjectsScreenState extends State<_MasterProjectsScreen> {
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: Row(children: [
-                  const Icon(Icons.monetization_on_outlined, size: 15, color: Color(0xFF34C77B)),
+                  const Icon(Icons.monetization_on_outlined, size: 15, color: Color(0xFF1A8F5C)),
                   const SizedBox(width: 8),
                   Text('Closed Revenue: ', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted)),
-                  Text(fmt(revenue), style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: const Color(0xFF34C77B))),
+                  Text(fmt(revenue), style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: const Color(0xFF1A8F5C))),
                 ]),
               ),
             ],
@@ -2353,7 +2353,7 @@ class _MasterProjectsScreenState extends State<_MasterProjectsScreen> {
                                     Row(children: [
                                       _miniStat('${leads.length}', 'Leads', AppColors.lavender),
                                       const SizedBox(width: 10),
-                                      _miniStat('$closedCount', 'Closed', const Color(0xFF34C77B)),
+                                      _miniStat('$closedCount', 'Closed', const Color(0xFF1A8F5C)),
                                       if (revenue > 0) ...[
                                         const SizedBox(width: 10),
                                         _miniStat(fmtR(revenue), 'Revenue', AppColors.peach),

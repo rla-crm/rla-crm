@@ -378,6 +378,7 @@ RLA CRM Platform
 
   Future<void> init() async {
     await Hive.initFlutter();
+    // Use try/catch per box to handle Chrome IndexedDB quirks gracefully
     _usersBox      = await Hive.openBox('users_v9');
     _leadsBox      = await Hive.openBox('leads_v9');
     _notifBox      = await Hive.openBox('notifs_v9');
@@ -389,11 +390,21 @@ RLA CRM Platform
     _loadAll();
 
     // Always await cloud sync on init — ensures users from ALL platforms
-    // are available before the login screen is shown.
-    // _syncFromCloud() is bidirectional: pulls remote + pushes local-only records.
+    // (Chrome, Safari, Firefox, mobile) are available before login screen shows.
+    // Force reset availability so Chrome cached "unavailable" state is cleared.
+    SyncService.resetAvailability();
     await _syncFromCloud();
 
-    // If still empty after cloud sync → seed master admin as fallback
+    // If still no users after first sync, do a second attempt with delay.
+    // This handles Chrome's async IndexedDB writes completing slower than Safari.
+    if (_users.isEmpty) {
+      if (kDebugMode) debugPrint('⚠️ No users after sync #1, retrying in 1s...');
+      await Future.delayed(const Duration(seconds: 1));
+      SyncService.resetAvailability();
+      await _syncFromCloud();
+    }
+
+    // If still empty after both cloud sync attempts → seed master admin as fallback
     if (_users.isEmpty) {
       _seedData();
       // Push the seeded master admin to cloud immediately
@@ -696,24 +707,40 @@ RLA CRM Platform
 
   // ─── Authentication ───────────────────────────────────────────────────────
   /// Returns null on success, or an error message string on failure.
-  /// On success, also triggers a background cloud sync so the user
-  /// immediately sees the latest data from all platforms.
+  /// Performs up to 2 cloud sync attempts to ensure users from all browsers/
+  /// platforms (Chrome, Safari, mobile) are always found — even on first login.
   Future<String?> loginWithErrorAsync(String emailOrUsername, String password) async {
-    // First: sync from cloud so we have the latest user list
+    // Attempt 1: Force reset availability and sync from cloud
+    SyncService.resetAvailability();
     await _syncFromCloud();
 
+    // Check if user exists after first sync
     AppUser? user;
     try {
       user = _users.firstWhere(
           (u) => u.email.toLowerCase() == emailOrUsername.toLowerCase());
     } catch (_) {
-      return 'No account found with this email address';
+      // User not found after first sync — do a second forced retry
+      // This handles Chrome cache/IndexedDB inconsistency vs Safari
+      if (kDebugMode) debugPrint('⚠️ User not found after sync #1, retrying...');
+      await Future.delayed(const Duration(milliseconds: 800));
+      SyncService.resetAvailability();
+      await _syncFromCloud();
+      try {
+        user = _users.firstWhere(
+            (u) => u.email.toLowerCase() == emailOrUsername.toLowerCase());
+      } catch (_) {
+        return 'No account found with this email address. Please check your email or contact admin.';
+      }
     }
+
     if (user.password != password) return 'Incorrect password. Please try again';
     if (!user.isApproved) return 'Your account is pending approval. Please contact the admin';
     if (!user.isActive) return 'Your account has been deactivated. Please contact the admin';
     _currentUser = user;
     notifyListeners();
+    // Background sync after login to pull latest data
+    unawaited(_syncFromCloud());
     return null;
   }
 

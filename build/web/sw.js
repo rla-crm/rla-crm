@@ -1,7 +1,8 @@
 // RLA crm — Service Worker
 // Provides offline caching so the app loads even without internet
+// v4 — Updated to invalidate stale Chrome caches for seamless cross-browser login
 
-const CACHE_NAME = 'rla-crm-v1';
+const CACHE_NAME = 'rla-crm-v4';
 
 // Core assets to cache on install (app shell)
 const CORE_ASSETS = [
@@ -22,7 +23,7 @@ const CORE_ASSETS = [
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      console.log('[SW] Caching app shell');
+      console.log('[SW] Caching app shell v4');
       // Use addAll but don't fail if individual assets are missing
       return Promise.allSettled(
         CORE_ASSETS.map(url => cache.add(url).catch(() => {}))
@@ -52,8 +53,11 @@ self.addEventListener('fetch', (event) => {
   // Only handle GET requests
   if (event.request.method !== 'GET') return;
 
-  // Skip cross-origin requests
+  // Skip cross-origin requests (API calls to rlacrm.com must go directly to network)
   if (!event.request.url.startsWith(self.location.origin)) return;
+
+  // Never cache API sync calls — always fetch fresh data
+  if (event.request.url.includes('/api/sync')) return;
 
   event.respondWith(
     fetch(event.request)

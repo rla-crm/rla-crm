@@ -60,9 +60,9 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
     if (!mounted) return;
     final state = context.read<AppState>();
 
-    // Use the async version which awaits a cloud sync before authenticating.
-    // This ensures users created on web / another device are always found,
-    // even on the very first login attempt on a fresh install.
+    // Use the async version which performs up to 2 cloud sync attempts before
+    // authenticating. This ensures seamless login across all browsers (Chrome,
+    // Safari, Firefox) and all devices — even on fresh installs.
     final err = await state.loginWithErrorAsync(email, pass);
 
     if (!mounted) return;
@@ -273,12 +273,38 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
                     color: AppColors.pink.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: Row(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(Icons.error_outline_rounded, size: 14, color: Color(0xFFD04060)),
-                      const SizedBox(width: 8),
-                      Expanded(child: Text(_error!,
-                          style: GoogleFonts.inter(fontSize: 12, color: const Color(0xFFD04060)))),
+                      Row(
+                        children: [
+                          const Icon(Icons.error_outline_rounded, size: 14, color: Color(0xFFD04060)),
+                          const SizedBox(width: 8),
+                          Expanded(child: Text(_error!,
+                              style: GoogleFonts.inter(fontSize: 12, color: const Color(0xFFD04060)))),
+                        ],
+                      ),
+                      // Show retry button if account not found (helps Chrome browser sync issues)
+                      if (_error!.contains('No account found')) ...[
+                        const SizedBox(height: 8),
+                        GestureDetector(
+                          onTap: _loading ? null : _login,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: AppColors.lavender.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: AppColors.lavender.withValues(alpha: 0.4)),
+                            ),
+                            child: Row(mainAxisSize: MainAxisSize.min, children: [
+                              const Icon(Icons.refresh_rounded, size: 13, color: AppColors.lavender),
+                              const SizedBox(width: 5),
+                              Text('Retry with fresh sync',
+                                  style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.lavender)),
+                            ]),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),

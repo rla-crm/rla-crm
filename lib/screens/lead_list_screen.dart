@@ -566,7 +566,7 @@ class _ClosedLeadsTab extends StatelessWidget {
                                 style: GoogleFonts.inter(
                                     fontSize: 14,
                                     fontWeight: FontWeight.w700,
-                                    color: const Color(0xFF34C77B))),
+                                    color: const Color(0xFF0D6B47))),
                             Text('${pLeads.length} deals',
                                 style: GoogleFonts.inter(
                                     fontSize: 11,
@@ -627,7 +627,7 @@ class _RevenueCard extends StatelessWidget {
             borderRadius: BorderRadius.circular(16),
             boxShadow: [
               BoxShadow(
-                  color: const Color(0xFF34C77B).withValues(alpha: 0.3),
+                  color: const Color(0xFF0D6B47).withValues(alpha: 0.3),
                   blurRadius: 16,
                   offset: const Offset(0, 6))
             ],

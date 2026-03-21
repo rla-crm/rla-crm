@@ -167,8 +167,35 @@
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function() {
         navigator.serviceWorker.register('/sw.js')
-          .then(reg => console.log('SW registered:', reg.scope))
+          .then(reg => {
+            console.log('SW registered:', reg.scope);
+            // Force-activate new service worker immediately (clears stale caches)
+            if (reg.waiting) {
+              reg.waiting.postMessage('SKIP_WAITING');
+            }
+            reg.addEventListener('updatefound', () => {
+              const newWorker = reg.installing;
+              if (newWorker) {
+                newWorker.addEventListener('statechange', () => {
+                  if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                    // New version installed — force skip waiting so Chrome gets latest
+                    newWorker.postMessage('SKIP_WAITING');
+                  }
+                });
+              }
+            });
+          })
           .catch(err => console.log('SW error:', err));
+        
+        // Listen for SW controller change and reload to get fresh app
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+          console.log('[SW] Controller changed — reloading for fresh data');
+          // Only reload if we haven't recently reloaded (prevent loops)
+          if (!sessionStorage.getItem('sw-reloaded')) {
+            sessionStorage.setItem('sw-reloaded', '1');
+            window.location.reload();
+          }
+        });
       });
     }
 

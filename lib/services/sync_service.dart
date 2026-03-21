@@ -62,6 +62,7 @@ class SyncService {
 
   static Map<String, String> get _headers => {
     'Content-Type': 'application/json',
+    'Accept': 'application/json',
     'X-Sync-Key': _syncKey,
   };
 

@@ -47,7 +47,9 @@ const JSONBLOB_URL  = `${JSONBLOB_BASE}/${JSONBLOB_ID}`;
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, X-Sync-Key',
+  'Access-Control-Allow-Headers': 'Content-Type, X-Sync-Key, Accept, Authorization',
+  'Access-Control-Max-Age': '86400',
+  'Cache-Control': 'no-store, no-cache, must-revalidate',
   'Content-Type': 'application/json',
 };
 
