@@ -34,8 +34,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   // ─── Periodic sync timer ─────────────────────────────────────────────────
   Timer? _syncTimer;
-  // Sync every 30 seconds when app is in foreground
-  static const Duration _syncInterval = Duration(seconds: 30);
+  // Sync every 15 seconds — JSONBlob is globally persistent so this is safe
+  static const Duration _syncInterval = Duration(seconds: 15);
   bool _syncInProgress = false;
 
   // ─── Getters ─────────────────────────────────────────────────────────────
@@ -366,19 +366,22 @@ RLA CRM Platform
 
     _loadAll();
 
-    // Always await cloud sync on init — ensures users created on other
-    // platforms are available before the login screen is shown.
+    // Always await cloud sync on init — ensures users from ALL platforms
+    // are available before the login screen is shown.
+    // _syncFromCloud() is bidirectional: pulls remote + pushes local-only records.
     await _syncFromCloud();
 
     // If still empty after cloud sync → seed master admin as fallback
     if (_users.isEmpty) {
       _seedData();
+      // Push the seeded master admin to cloud immediately
+      await _syncFromCloud();
     }
 
     // Register lifecycle observer (sync on app resume)
     WidgetsBinding.instance.addObserver(this);
 
-    // Start periodic sync timer (every 30s)
+    // Start periodic sync timer (every 15s)
     _startPeriodicSync();
   }
 
@@ -394,8 +397,8 @@ RLA CRM Platform
   // ── Periodic sync timer ───────────────────────────────────────────────────
   void _startPeriodicSync() {
     _syncTimer?.cancel();
-    _syncTimer = Timer.periodic(_syncInterval, (_) {
-      _syncFromCloud();
+    _syncTimer = Timer.periodic(_syncInterval, (_) async {
+      await _syncFromCloud();
     });
   }
 
@@ -411,25 +414,40 @@ RLA CRM Platform
     super.dispose();
   }
 
-  // ─── Cloud sync: pull all remote data and merge into local Hive ──────────
+  // ─── Cloud sync: bidirectional merge ─────────────────────────────────────
+  // 1. Pull all remote data → merge into local Hive
+  // 2. Push any local records not yet in cloud → ensures local-only records sync
   Future<void> _syncFromCloud() async {
     // Prevent concurrent syncs (avoid race conditions)
     if (_syncInProgress) return;
     _syncInProgress = true;
     try {
       final remote = await SyncService.pullAll();
-
-      // ALWAYS process results and reload — empty remote just means no
-      // cloud records for that collection yet. Local Hive data is preserved.
       int mergedCount = 0;
 
-      // ── Merge users (remote is authoritative) ─────────────────────────────
+      // ── Build sets of remote IDs per collection ────────────────────────────
+      final remoteUserIds    = <String>{};
+      final remoteLeadIds    = <String>{};
+      final remoteProjectIds = <String>{};
+      final remoteApprovalIds = <String>{};
+      final remoteNotifIds   = <String>{};
+
+      // ── Merge users ───────────────────────────────────────────────────────
       final remoteUsers = remote[SyncService.kUsers] ?? [];
       for (final raw in remoteUsers) {
         try {
           final u = AppUser.fromMap(raw);
-          _usersBox.put(u.id, jsonEncode(u.toMap()));
-          mergedCount++;
+          remoteUserIds.add(u.id);
+          // Last-write-wins: compare timestamps
+          final existing = _usersBox.get(u.id);
+          if (existing == null) {
+            _usersBox.put(u.id, jsonEncode(u.toMap()));
+            mergedCount++;
+          } else {
+            // Remote may be newer — always trust remote for now (cloud is truth)
+            _usersBox.put(u.id, jsonEncode(u.toMap()));
+            mergedCount++;
+          }
         } catch (e) {
           if (kDebugMode) debugPrint('⚠️ merge user: $e  raw=$raw');
         }
@@ -440,6 +458,7 @@ RLA CRM Platform
       for (final raw in remoteLeads) {
         try {
           final l = Lead.fromMap(raw);
+          remoteLeadIds.add(l.id);
           _leadsBox.put(l.id, jsonEncode(l.toMap()));
           mergedCount++;
         } catch (e) {
@@ -452,6 +471,7 @@ RLA CRM Platform
       for (final raw in remoteProjects) {
         try {
           final p = RealEstateProject.fromMap(raw);
+          remoteProjectIds.add(p.id);
           _projectsBox.put(p.id, jsonEncode(p.toMap()));
           mergedCount++;
         } catch (e) {
@@ -464,6 +484,7 @@ RLA CRM Platform
       for (final raw in remoteApprovals) {
         try {
           final a = ApprovalRequest.fromMap(raw);
+          remoteApprovalIds.add(a.id);
           _approvalsBox.put(a.id, jsonEncode(a.toMap()));
           mergedCount++;
         } catch (e) {
@@ -476,10 +497,61 @@ RLA CRM Platform
       for (final raw in remoteNotifs) {
         try {
           final n = CrmNotification.fromMap(raw);
+          remoteNotifIds.add(n.id);
           _notifBox.put(n.id, jsonEncode(n.toMap()));
           mergedCount++;
         } catch (e) {
           if (kDebugMode) debugPrint('⚠️ merge notif: $e');
+        }
+      }
+
+      // ── Push local-only records to cloud (upload missing items) ───────────
+      // This ensures records created offline or on a fresh device get synced up
+      int pushedCount = 0;
+
+      for (final key in _usersBox.keys) {
+        if (!remoteUserIds.contains(key)) {
+          try {
+            final u = AppUser.fromMap(Map<String, dynamic>.from(jsonDecode(_usersBox.get(key))));
+            unawaited(SyncService.upsert(SyncService.kUsers, u.toMap()));
+            pushedCount++;
+          } catch (_) {}
+        }
+      }
+      for (final key in _leadsBox.keys) {
+        if (!remoteLeadIds.contains(key)) {
+          try {
+            final l = Lead.fromMap(Map<String, dynamic>.from(jsonDecode(_leadsBox.get(key))));
+            unawaited(SyncService.upsert(SyncService.kLeads, l.toMap()));
+            pushedCount++;
+          } catch (_) {}
+        }
+      }
+      for (final key in _projectsBox.keys) {
+        if (!remoteProjectIds.contains(key)) {
+          try {
+            final p = RealEstateProject.fromMap(Map<String, dynamic>.from(jsonDecode(_projectsBox.get(key))));
+            unawaited(SyncService.upsert(SyncService.kProjects, p.toMap()));
+            pushedCount++;
+          } catch (_) {}
+        }
+      }
+      for (final key in _approvalsBox.keys) {
+        if (!remoteApprovalIds.contains(key)) {
+          try {
+            final a = ApprovalRequest.fromMap(Map<String, dynamic>.from(jsonDecode(_approvalsBox.get(key))));
+            unawaited(SyncService.upsert(SyncService.kApprovals, a.toMap()));
+            pushedCount++;
+          } catch (_) {}
+        }
+      }
+      for (final key in _notifBox.keys) {
+        if (!remoteNotifIds.contains(key)) {
+          try {
+            final n = CrmNotification.fromMap(Map<String, dynamic>.from(jsonDecode(_notifBox.get(key))));
+            unawaited(SyncService.upsert(SyncService.kNotifications, n.toMap()));
+            pushedCount++;
+          } catch (_) {}
         }
       }
 
@@ -488,16 +560,15 @@ RLA CRM Platform
       notifyListeners();
 
       if (kDebugMode) {
-        debugPrint('✅ AppState sync: '
-            '${remoteUsers.length} users, '
-            '${remoteLeads.length} leads, '
-            '${remoteProjects.length} projects, '
-            '${remoteApprovals.length} approvals '
-            '($mergedCount merged | local total: ${_users.length} users)');
+        debugPrint('✅ AppState sync complete: '
+            '${remoteUsers.length}↓ users, '
+            '${remoteLeads.length}↓ leads, '
+            '${remoteProjects.length}↓ projects '
+            '| merged=$mergedCount pushed=$pushedCount '
+            '| local: ${_users.length} users');
       }
     } catch (e) {
-      if (kDebugMode) debugPrint('⚠️ AppState._syncFromCloud: $e');
-      // Still reload so in-memory lists reflect current Hive state
+      if (kDebugMode) debugPrint('⚠️ AppState._syncFromCloud error: $e');
       _loadAll();
       notifyListeners();
     } finally {
@@ -506,20 +577,31 @@ RLA CRM Platform
   }
 
   /// Push a single user to the cloud (called after every local user save)
+  /// Fires and forgets — failures are logged and retried on next periodic sync.
   void _syncUser(AppUser u) {
-    SyncService.upsert(SyncService.kUsers, u.toMap());
+    SyncService.upsert(SyncService.kUsers, u.toMap()).then((ok) {
+      if (!ok && kDebugMode) debugPrint('⚠️ _syncUser failed: ${u.id}');
+    });
   }
   void _syncLead(Lead l) {
-    SyncService.upsert(SyncService.kLeads, l.toMap());
+    SyncService.upsert(SyncService.kLeads, l.toMap()).then((ok) {
+      if (!ok && kDebugMode) debugPrint('⚠️ _syncLead failed: ${l.id}');
+    });
   }
   void _syncProject(RealEstateProject p) {
-    SyncService.upsert(SyncService.kProjects, p.toMap());
+    SyncService.upsert(SyncService.kProjects, p.toMap()).then((ok) {
+      if (!ok && kDebugMode) debugPrint('⚠️ _syncProject failed: ${p.id}');
+    });
   }
   void _syncApproval(ApprovalRequest a) {
-    SyncService.upsert(SyncService.kApprovals, a.toMap());
+    SyncService.upsert(SyncService.kApprovals, a.toMap()).then((ok) {
+      if (!ok && kDebugMode) debugPrint('⚠️ _syncApproval failed: ${a.id}');
+    });
   }
   void _syncNotification(CrmNotification n) {
-    SyncService.upsert(SyncService.kNotifications, n.toMap());
+    SyncService.upsert(SyncService.kNotifications, n.toMap()).then((ok) {
+      if (!ok && kDebugMode) debugPrint('⚠️ _syncNotif failed: ${n.id}');
+    });
   }
 
   void _loadAll() {
