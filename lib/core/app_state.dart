@@ -501,15 +501,50 @@ RLA CRM Platform
   }
 
   // ─── Cloud sync: bidirectional merge ─────────────────────────────────────
-  // 1. Pull all remote data → merge into local Hive
-  // 2. Push any local records not yet in cloud → ensures local-only records sync
+  // 1. Pull all remote data + deleted ledger → merge into local Hive
+  // 2. Apply remote deletions to local Hive (propagates admin deletes to all clients)
+  // 3. Push any local records not yet in cloud → ensures local-only records sync
   Future<void> _syncFromCloud() async {
     // Prevent concurrent syncs (avoid race conditions)
     if (_syncInProgress) return;
     _syncInProgress = true;
     try {
-      final remote = await SyncService.pullAll();
+      final pullResult = await SyncService.pullAll();
+      final remote = pullResult.collections;
       int mergedCount = 0;
+
+      // ── STEP 1: Apply cloud-level deleted_ledger to local Hive ───────────
+      // This is the KEY fix: when an admin deletes a lead on their device,
+      // the cloud records it in the ledger. Every other client (including sales
+      // users) reads the ledger on each sync and deletes the matching local record.
+      int remoteDeletedCount = 0;
+      for (final entry in pullResult.deletedLedger) {
+        final col = entry['collection'] as String? ?? '';
+        final id  = entry['id'] as String? ?? '';
+        if (id.isEmpty) continue;
+
+        // Add to local tombstone so the "push missing records" loop won't re-upload
+        switch (col) {
+          case SyncService.kLeads:
+            _deletedLeadIds.add(id);
+            if (_leadsBox.containsKey(id)) { _leadsBox.delete(id); remoteDeletedCount++; }
+          case SyncService.kProjects:
+            _deletedProjectIds.add(id);
+            if (_projectsBox.containsKey(id)) { _projectsBox.delete(id); remoteDeletedCount++; }
+          case SyncService.kUsers:
+            _deletedUserIds.add(id);
+            if (_usersBox.containsKey(id)) { _usersBox.delete(id); remoteDeletedCount++; }
+          case SyncService.kApprovals:
+            _deletedApprovalIds.add(id);
+            if (_approvalsBox.containsKey(id)) { _approvalsBox.delete(id); remoteDeletedCount++; }
+          case SyncService.kNotifications:
+            _deletedNotifIds.add(id);
+            if (_notifBox.containsKey(id)) { _notifBox.delete(id); remoteDeletedCount++; }
+        }
+      }
+      if (remoteDeletedCount > 0 && kDebugMode) {
+        debugPrint('🗑️ Applied $remoteDeletedCount remote deletion(s) from cloud ledger');
+      }
 
       // ── Build sets of remote IDs per collection ────────────────────────────
       final remoteUserIds    = <String>{};

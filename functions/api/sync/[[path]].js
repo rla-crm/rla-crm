@@ -1,20 +1,25 @@
 /**
- * RLA CRM Sync API v5 — Cloudflare Pages Function
+ * RLA CRM Sync API v6 — Cloudflare Pages Function
+ *
+ * KEY ADDITION in v6: Cloud-level deleted_ids ledger
+ *  - Every DELETE request records { collection, id, deletedAt } in
+ *    store._deleted_ledger (an array, max 500 entries, oldest pruned).
+ *  - GET /api/sync/all includes the full ledger in the response.
+ *  - Every Flutter client applies those deletions to its local Hive box
+ *    on every sync, so deleted leads/projects instantly disappear from
+ *    ALL devices — including sales users who didn't perform the delete.
  *
  * STORAGE: Dual-JSONBlob with auto-recreate guard
  *  - Primary blob:   019d1680-eb78-7664-ba7c-a7e2d78a787e
  *  - Backup blob:    auto-created if primary fails
  *  - Master admin is ALWAYS re-seeded if cloud users collection is empty
  *
- * This ensures the app works seamlessly across ALL platforms, browsers,
- * devices and private/incognito sessions at all times.
- *
  * Endpoints:
  *   GET    /api/sync/health                    → health check
- *   GET    /api/sync/all                       → all collections at once
+ *   GET    /api/sync/all                       → all collections + deleted ledger
  *   GET    /api/sync?collection=rla_users      → list records
  *   POST   /api/sync?collection=rla_users      → upsert record
- *   DELETE /api/sync?collection=rla_users&id=x → delete record
+ *   DELETE /api/sync?collection=rla_users&id=x → delete record (logged to ledger)
  */
 
 const COLLECTIONS = [
@@ -30,6 +35,9 @@ const JSONBLOB_BASE = 'https://jsonblob.com/api/jsonBlob';
 
 // Primary blob ID — always kept alive by this worker
 const PRIMARY_BLOB_ID = '019d1680-eb78-7664-ba7c-a7e2d78a787e';
+
+// Max entries kept in the deleted_ledger (older ones are pruned)
+const MAX_LEDGER_ENTRIES = 500;
 
 // ── Master admin seed — always present in cloud ───────────────────────────────
 const MASTER_ADMIN_SEED = {
@@ -55,6 +63,7 @@ function emptyStore() {
     rla_projects:      {},
     rla_approvals:     {},
     rla_notifications: {},
+    _deleted_ledger:   [],   // array of { collection, id, deletedAt }
   };
 }
 
@@ -78,9 +87,8 @@ async function readBlob(blobId) {
   const res = await fetch(`${JSONBLOB_BASE}/${blobId}`, {
     headers: { 'Accept': 'application/json', 'Cache-Control': 'no-cache' },
   });
-  if (!res.ok) return null;   // blob missing or error
+  if (!res.ok) return null;
   const data = await res.json();
-  // Detect error response from JSONBlob ({"error":"Blob not found"})
   if (data && data.error) return null;
   return data;
 }
@@ -101,26 +109,19 @@ async function createBlob(store) {
     body: JSON.stringify(store),
   });
   if (!res.ok) return null;
-  // Extract ID from Location header: https://jsonblob.com/api/jsonBlob/<ID>
   const loc = res.headers.get('Location') || '';
   const match = loc.match(/jsonBlob\/([a-f0-9-]{36})/i);
   return match ? match[1] : null;
 }
 
 // ── Read store with auto-heal ─────────────────────────────────────────────────
-// 1. Try primary blob
-// 2. If missing/error → recreate primary blob with seed data
-// 3. Always ensure master admin is present in rla_users
 async function readStore() {
   let store = await readBlob(PRIMARY_BLOB_ID);
 
   if (!store) {
-    // Primary blob is gone — recreate it
     console.warn('[RLA-CRM] Primary blob missing, recreating with seed data…');
     store = emptyStore();
-    // Try to write back to primary (it may have been auto-deleted by JSONBlob after inactivity)
     await writeBlob(PRIMARY_BLOB_ID, store);
-    // If that fails too, create a new blob (we log but keep going)
   }
 
   // Ensure all collections exist
@@ -128,8 +129,12 @@ async function readStore() {
     if (!store[col]) store[col] = {};
   }
 
+  // Ensure deleted ledger exists
+  if (!Array.isArray(store._deleted_ledger)) {
+    store._deleted_ledger = [];
+  }
+
   // ── CRITICAL: Always ensure master admin exists ───────────────────────────
-  // If cloud rla_users is empty or master admin record missing → re-seed it
   if (!store.rla_users || Object.keys(store.rla_users).length === 0 ||
       !store.rla_users['master_admin_001']) {
     console.warn('[RLA-CRM] Master admin missing from cloud — re-seeding…');
@@ -138,7 +143,6 @@ async function readStore() {
       ...MASTER_ADMIN_SEED,
       sync_updated_at: new Date().toISOString(),
     };
-    // Write the healed store back immediately
     await writeBlob(PRIMARY_BLOB_ID, store);
   }
 
@@ -155,9 +159,13 @@ async function writeStore(store) {
     };
   }
 
+  // Ensure deleted ledger exists
+  if (!Array.isArray(store._deleted_ledger)) {
+    store._deleted_ledger = [];
+  }
+
   const ok = await writeBlob(PRIMARY_BLOB_ID, store);
   if (!ok) {
-    // Primary write failed — try to recreate the blob
     console.warn('[RLA-CRM] Primary blob write failed, attempting recreate…');
     const newId = await createBlob(store);
     if (newId) {
@@ -166,6 +174,28 @@ async function writeStore(store) {
     throw new Error('Storage write failed — please retry');
   }
   return true;
+}
+
+// ── Append to deleted ledger ──────────────────────────────────────────────────
+function appendToLedger(store, collection, id) {
+  if (!Array.isArray(store._deleted_ledger)) {
+    store._deleted_ledger = [];
+  }
+  // Avoid duplicate entries for the same id+collection
+  store._deleted_ledger = store._deleted_ledger.filter(
+    e => !(e.collection === collection && e.id === id)
+  );
+  store._deleted_ledger.push({
+    collection,
+    id,
+    deletedAt: new Date().toISOString(),
+  });
+  // Prune to max size (keep most recent)
+  if (store._deleted_ledger.length > MAX_LEDGER_ENTRIES) {
+    store._deleted_ledger = store._deleted_ledger.slice(
+      store._deleted_ledger.length - MAX_LEDGER_ENTRIES
+    );
+  }
 }
 
 // ── Main request handler ──────────────────────────────────────────────────────
@@ -181,26 +211,28 @@ export async function onRequest(context) {
 
   // ── Health check ────────────────────────────────────────────────────────────
   if (path === 'health' || path === 'health/') {
-    // Quick read to verify blob is alive
     let blobStatus = 'ok';
     let userCount  = 0;
+    let ledgerSize = 0;
     try {
       const store = await readStore();
-      userCount = Object.keys(store.rla_users || {}).length;
+      userCount   = Object.keys(store.rla_users || {}).length;
+      ledgerSize  = (store._deleted_ledger || []).length;
     } catch (e) {
       blobStatus = 'degraded: ' + e.message;
     }
     return json({
       status: blobStatus === 'ok' ? 'ok' : 'degraded',
-      service: 'RLA CRM Sync API v5',
+      service: 'RLA CRM Sync API v6',
       storage: 'jsonblob-dual (global-persistent)',
       blobId: PRIMARY_BLOB_ID,
       userCount,
+      deletedLedgerSize: ledgerSize,
       timestamp: new Date().toISOString(),
     });
   }
 
-  // ── GET ALL: single-request pull for all collections ───────────────────────
+  // ── GET ALL: single-request pull for all collections + deleted ledger ────────
   if (request.method === 'GET' && (path === 'all' || path === 'all/')) {
     try {
       const store = await readStore();
@@ -208,7 +240,11 @@ export async function onRequest(context) {
       for (const col of COLLECTIONS) {
         result[col] = Object.values(store[col] || {});
       }
-      return json({ collections: result, storage: 'jsonblob-v5' });
+      return json({
+        collections:     result,
+        deleted_ledger:  store._deleted_ledger || [],
+        storage:         'jsonblob-v6',
+      });
     } catch (e) {
       return json({ error: e.message }, 500);
     }
@@ -239,7 +275,7 @@ export async function onRequest(context) {
           return !ts || new Date(ts) >= sinceDate;
         });
       }
-      return json({ records, count: records.length, storage: 'jsonblob-v5', collection });
+      return json({ records, count: records.length, storage: 'jsonblob-v6', collection });
     } catch (e) {
       return json({ error: e.message, records: [] }, 500);
     }
@@ -257,9 +293,17 @@ export async function onRequest(context) {
       const store = await readStore();
       if (!store[collection]) store[collection] = {};
       store[collection][body.id] = body;
-      await writeStore(store);
 
-      return json({ success: true, id: body.id, storage: 'jsonblob-v5' });
+      // If this ID was previously in the ledger (deleted then re-added),
+      // remove it from the ledger so it won't be deleted again on other clients.
+      if (Array.isArray(store._deleted_ledger)) {
+        store._deleted_ledger = store._deleted_ledger.filter(
+          e => !(e.collection === collection && e.id === body.id)
+        );
+      }
+
+      await writeStore(store);
+      return json({ success: true, id: body.id, storage: 'jsonblob-v6' });
     } catch (e) {
       return json({ error: e.message }, 500);
     }
@@ -277,11 +321,19 @@ export async function onRequest(context) {
       }
 
       const store = await readStore();
+
+      // Remove from the collection
       if (store[collection] && store[collection][id]) {
         delete store[collection][id];
-        await writeStore(store);
       }
-      return json({ success: true, id });
+
+      // ── CRITICAL: Record deletion in the ledger ───────────────────────────
+      // Every other client will read this ledger on their next sync and
+      // delete the matching record from their local Hive box.
+      appendToLedger(store, collection, id);
+
+      await writeStore(store);
+      return json({ success: true, id, ledgerSize: store._deleted_ledger.length });
     } catch (e) {
       return json({ error: e.message }, 500);
     }

@@ -20,6 +20,19 @@ import 'package:http/http.dart' as http;
 // Sync is opportunistic — app works offline and syncs when connected.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─── PullResult ──────────────────────────────────────────────────────────────
+// Returned by pullAll — carries both the collection data and the deleted ledger.
+class PullResult {
+  /// Map of collection name → list of record maps
+  final Map<String, List<Map<String, dynamic>>> collections;
+
+  /// List of { 'collection': String, 'id': String, 'deletedAt': String }
+  /// These are records deleted by ANY client that every device must apply.
+  final List<Map<String, dynamic>> deletedLedger;
+
+  const PullResult({required this.collections, required this.deletedLedger});
+}
+
 class SyncService {
   static const String _baseUrl = 'https://rlacrm.com/api/sync';
   static const String _syncKey = 'rla-crm-sync-2024-xK9mP3nQ';
@@ -85,10 +98,11 @@ class SyncService {
     return false;
   }
 
-  // ── Pull ALL collections in a single HTTP request ─────────────────────────
-  // Much more efficient than 5 separate requests.
-  // Returns map of collection → list of records.
-  static Future<Map<String, List<Map<String, dynamic>>>> pullAll() async {
+  // ── Pull ALL collections + deleted ledger in a single HTTP request ─────────
+  // Returns a PullResult with both collections data and the cloud deleted ledger.
+  // Every client applies the deleted_ledger to its local Hive so deletions
+  // made by the admin propagate instantly to ALL devices (sales, other admins).
+  static Future<PullResult> pullAll() async {
     resetAvailability(); // always try on pullAll (called during init/login)
     try {
       final res = await http
@@ -101,25 +115,32 @@ class SyncService {
       if (res.statusCode == 200) {
         _available = true;
         final data = jsonDecode(res.body) as Map<String, dynamic>;
-        final collections = data['collections'] as Map<String, dynamic>? ?? {};
+        final collectionsRaw = data['collections'] as Map<String, dynamic>? ?? {};
 
-        final result = <String, List<Map<String, dynamic>>>{};
+        final collections = <String, List<Map<String, dynamic>>>{};
         for (final col in [kUsers, kLeads, kProjects, kApprovals, kNotifications]) {
-          final list = collections[col] as List? ?? [];
-          result[col] = list
+          final list = collectionsRaw[col] as List? ?? [];
+          collections[col] = list
               .map((r) => Map<String, dynamic>.from(r as Map))
               .toList();
         }
 
+        // Parse deleted_ledger — list of {collection, id, deletedAt}
+        final rawLedger = data['deleted_ledger'] as List? ?? [];
+        final deletedLedger = rawLedger
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+
         if (kDebugMode) {
           debugPrint('✅ SyncService.pullAll (single request): '
-              '${result[kUsers]?.length ?? 0} users, '
-              '${result[kLeads]?.length ?? 0} leads, '
-              '${result[kProjects]?.length ?? 0} projects, '
-              '${result[kApprovals]?.length ?? 0} approvals, '
-              '${result[kNotifications]?.length ?? 0} notifs');
+              '${collections[kUsers]?.length ?? 0} users, '
+              '${collections[kLeads]?.length ?? 0} leads, '
+              '${collections[kProjects]?.length ?? 0} projects, '
+              '${collections[kApprovals]?.length ?? 0} approvals, '
+              '${collections[kNotifications]?.length ?? 0} notifs, '
+              '${deletedLedger.length} deletions');
         }
-        return result;
+        return PullResult(collections: collections, deletedLedger: deletedLedger);
       }
 
       if (kDebugMode) debugPrint('⚠️ SyncService.pullAll: HTTP ${res.statusCode}');
@@ -128,8 +149,11 @@ class SyncService {
       _markUnavailable();
     }
 
-    // Fallback: try individual collection fetches
-    return await _pullAllFallback();
+    // Fallback: try individual collection fetches (no ledger available)
+    return PullResult(
+      collections: await _pullAllFallback(),
+      deletedLedger: [],
+    );
   }
 
   // ── Fallback: fetch collections individually ──────────────────────────────
