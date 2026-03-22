@@ -1,8 +1,7 @@
 // RLA crm — Service Worker
-// Provides offline caching so the app loads even without internet
-// v4 — Updated to invalidate stale Chrome caches for seamless cross-browser login
+// v5 — Dual-blob storage, master admin always seeded, 3-attempt login sync
 
-const CACHE_NAME = 'rla-crm-v4';
+const CACHE_NAME = 'rla-crm-v5';
 
 // Core assets to cache on install (app shell)
 const CORE_ASSETS = [
@@ -58,6 +57,7 @@ self.addEventListener('fetch', (event) => {
 
   // Never cache API sync calls — always fetch fresh data
   if (event.request.url.includes('/api/sync')) return;
+  if (event.request.url.includes('jsonblob.com')) return;
 
   event.respondWith(
     fetch(event.request)
@@ -89,4 +89,11 @@ self.addEventListener('message', (event) => {
   if (event.data === 'SKIP_WAITING') {
     self.skipWaiting();
   }
+});
+
+// Force all open tabs to reload when new SW takes over
+self.addEventListener('controllerchange', () => {
+  self.clients.matchAll({ type: 'window' }).then(clients => {
+    clients.forEach(client => client.navigate(client.url));
+  });
 });

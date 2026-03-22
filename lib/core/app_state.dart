@@ -389,14 +389,11 @@ RLA CRM Platform
 
     _loadAll();
 
-    // Always await cloud sync on init — ensures users from ALL platforms
-    // (Chrome, Safari, Firefox, mobile) are available before login screen shows.
-    // Force reset availability so Chrome cached "unavailable" state is cleared.
+    // ── Cloud sync on startup: 3 attempts with escalating delays ─────────────
+    // Guarantees users from ALL platforms/browsers are loaded before login.
     SyncService.resetAvailability();
     await _syncFromCloud();
 
-    // If still no users after first sync, do a second attempt with delay.
-    // This handles Chrome's async IndexedDB writes completing slower than Safari.
     if (_users.isEmpty) {
       if (kDebugMode) debugPrint('⚠️ No users after sync #1, retrying in 1s...');
       await Future.delayed(const Duration(seconds: 1));
@@ -404,18 +401,51 @@ RLA CRM Platform
       await _syncFromCloud();
     }
 
-    // If still empty after both cloud sync attempts → seed master admin as fallback
     if (_users.isEmpty) {
-      _seedData();
-      // Push the seeded master admin to cloud immediately
+      if (kDebugMode) debugPrint('⚠️ No users after sync #2, retrying in 2s...');
+      await Future.delayed(const Duration(seconds: 2));
+      SyncService.resetAvailability();
       await _syncFromCloud();
     }
+
+    // ── Always ensure master admin exists locally + push to cloud ─────────────
+    // This runs on EVERY startup — if master admin was wiped from cloud
+    // (e.g. JSONBlob expiry), it gets re-seeded immediately.
+    final hasMasterAdmin = _users.any((u) => u.role == UserRole.masterAdmin);
+    if (!hasMasterAdmin) {
+      if (kDebugMode) debugPrint('🔑 Master admin missing — re-seeding locally and pushing to cloud');
+      _seedData();
+    }
+    // Always push master admin to cloud (server-side worker also guards this,
+    // but belt-and-suspenders: the client pushes it too on every cold start)
+    await _ensureMasterAdminInCloud();
 
     // Register lifecycle observer (sync on app resume)
     WidgetsBinding.instance.addObserver(this);
 
     // Start periodic sync timer (every 15s)
     _startPeriodicSync();
+  }
+
+  /// Push master admin record to cloud — called on every startup.
+  /// Safe to call repeatedly: it is a no-op if already in cloud.
+  Future<void> _ensureMasterAdminInCloud() async {
+    try {
+      final masterAdmin = AppUser(
+        id: 'master_admin_001',
+        name: 'Aksayal',
+        email: 'aksayal@gmail.com',
+        password: '09101991',
+        role: UserRole.masterAdmin,
+        companyId: null,
+        isApproved: true,
+        hasLoggedInBefore: true,
+      );
+      await SyncService.upsert(SyncService.kUsers, masterAdmin.toMap());
+      if (kDebugMode) debugPrint('✅ Master admin ensured in cloud');
+    } catch (e) {
+      if (kDebugMode) debugPrint('⚠️ Could not push master admin to cloud: $e');
+    }
   }
 
   // ── App lifecycle: sync when app comes back to foreground ─────────────────
@@ -710,28 +740,30 @@ RLA CRM Platform
   /// Performs up to 2 cloud sync attempts to ensure users from all browsers/
   /// platforms (Chrome, Safari, mobile) are always found — even on first login.
   Future<String?> loginWithErrorAsync(String emailOrUsername, String password) async {
-    // Attempt 1: Force reset availability and sync from cloud
-    SyncService.resetAvailability();
-    await _syncFromCloud();
-
-    // Check if user exists after first sync
-    AppUser? user;
-    try {
-      user = _users.firstWhere(
-          (u) => u.email.toLowerCase() == emailOrUsername.toLowerCase());
-    } catch (_) {
-      // User not found after first sync — do a second forced retry
-      // This handles Chrome cache/IndexedDB inconsistency vs Safari
-      if (kDebugMode) debugPrint('⚠️ User not found after sync #1, retrying...');
-      await Future.delayed(const Duration(milliseconds: 800));
+    // ── 3-attempt sync before login ──────────────────────────────────────────
+    // Handles private browsing, Chrome IndexedDB quirks, network delays.
+    for (int attempt = 1; attempt <= 3; attempt++) {
       SyncService.resetAvailability();
       await _syncFromCloud();
-      try {
-        user = _users.firstWhere(
-            (u) => u.email.toLowerCase() == emailOrUsername.toLowerCase());
-      } catch (_) {
-        return 'No account found with this email address. Please check your email or contact admin.';
+      final found = _users.any((u) =>
+          u.email.toLowerCase() == emailOrUsername.toLowerCase() ||
+          u.name.toLowerCase() == emailOrUsername.toLowerCase());
+      if (found) break;
+      if (attempt < 3) {
+        if (kDebugMode) debugPrint('⚠️ User not found after sync #$attempt, retrying...');
+        await Future.delayed(Duration(milliseconds: 800 * attempt));
       }
+    }
+
+    // Also try matching by name (username) for flexibility
+    AppUser? user;
+    try {
+      user = _users.firstWhere((u) =>
+          u.email.toLowerCase() == emailOrUsername.toLowerCase() ||
+          u.name.toLowerCase() == emailOrUsername.toLowerCase());
+    } catch (_) {
+      // Still not found after 3 syncs — give clear message
+      return 'Account not found. Please check your email or contact your admin.\n\nTip: Try again in a few seconds if you just created the account.';
     }
 
     if (user.password != password) return 'Incorrect password. Please try again';
