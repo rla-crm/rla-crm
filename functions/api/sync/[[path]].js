@@ -1,25 +1,26 @@
 /**
- * RLA CRM Sync API v6 — Cloudflare Pages Function
+ * RLA CRM Sync API v7 — Cloudflare Pages Function
  *
- * KEY ADDITION in v6: Cloud-level deleted_ids ledger
- *  - Every DELETE request records { collection, id, deletedAt } in
- *    store._deleted_ledger (an array, max 500 entries, oldest pruned).
- *  - GET /api/sync/all includes the full ledger in the response.
- *  - Every Flutter client applies those deletions to its local Hive box
- *    on every sync, so deleted leads/projects instantly disappear from
- *    ALL devices — including sales users who didn't perform the delete.
+ * NEW in v7: Real-time sync infrastructure
+ *  1. sync_version: monotonically-increasing integer incremented on EVERY write.
+ *     Flutter polls GET /api/sync/version every 5s — a tiny 1-field response.
+ *     Only fetches the full /all payload when the version has changed.
+ *     This makes "is there anything new?" nearly free (single number compare).
  *
- * STORAGE: Dual-JSONBlob with auto-recreate guard
- *  - Primary blob:   019d1680-eb78-7664-ba7c-a7e2d78a787e
- *  - Backup blob:    auto-created if primary fails
- *  - Master admin is ALWAYS re-seeded if cloud users collection is empty
+ *  2. Persistent deleted_ledger (from v6) — still present, max 500 entries.
+ *
+ *  3. Per-collection timestamps: each record gets sync_updated_at on upsert.
+ *     Clients can use ?since= for incremental pulls in future.
+ *
+ * STORAGE: JSONBlob with auto-recreate guard (primary blob always kept alive).
  *
  * Endpoints:
- *   GET    /api/sync/health                    → health check
- *   GET    /api/sync/all                       → all collections + deleted ledger
- *   GET    /api/sync?collection=rla_users      → list records
- *   POST   /api/sync?collection=rla_users      → upsert record
- *   DELETE /api/sync?collection=rla_users&id=x → delete record (logged to ledger)
+ *   GET    /api/sync/health           → health + version + ledger size
+ *   GET    /api/sync/version          → { version, updatedAt }  (lightweight poll)
+ *   GET    /api/sync/all              → all collections + deleted_ledger + version
+ *   GET    /api/sync?collection=x     → list records in collection
+ *   POST   /api/sync?collection=x     → upsert record  (bumps version)
+ *   DELETE /api/sync?collection=x&id=y → delete record (bumps version + ledger)
  */
 
 const COLLECTIONS = [
@@ -32,14 +33,9 @@ const COLLECTIONS = [
 
 const API_SECRET    = 'rla-crm-sync-2024-xK9mP3nQ';
 const JSONBLOB_BASE = 'https://jsonblob.com/api/jsonBlob';
-
-// Primary blob ID — always kept alive by this worker
 const PRIMARY_BLOB_ID = '019d1680-eb78-7664-ba7c-a7e2d78a787e';
-
-// Max entries kept in the deleted_ledger (older ones are pruned)
 const MAX_LEDGER_ENTRIES = 500;
 
-// ── Master admin seed — always present in cloud ───────────────────────────────
 const MASTER_ADMIN_SEED = {
   id: 'master_admin_001',
   name: 'Aksayal',
@@ -63,7 +59,9 @@ function emptyStore() {
     rla_projects:      {},
     rla_approvals:     {},
     rla_notifications: {},
-    _deleted_ledger:   [],   // array of { collection, id, deletedAt }
+    _deleted_ledger:   [],
+    _sync_version:     1,
+    _sync_updated_at:  new Date().toISOString(),
   };
 }
 
@@ -82,7 +80,6 @@ function json(data, status = 200) {
 }
 
 // ── JSONBlob helpers ──────────────────────────────────────────────────────────
-
 async function readBlob(blobId) {
   const res = await fetch(`${JSONBLOB_BASE}/${blobId}`, {
     headers: { 'Accept': 'application/json', 'Cache-Control': 'no-cache' },
@@ -119,7 +116,7 @@ async function readStore() {
   let store = await readBlob(PRIMARY_BLOB_ID);
 
   if (!store) {
-    console.warn('[RLA-CRM] Primary blob missing, recreating with seed data…');
+    console.warn('[RLA-CRM] Primary blob missing, recreating…');
     store = emptyStore();
     await writeBlob(PRIMARY_BLOB_ID, store);
   }
@@ -128,16 +125,14 @@ async function readStore() {
   for (const col of COLLECTIONS) {
     if (!store[col]) store[col] = {};
   }
+  if (!Array.isArray(store._deleted_ledger)) store._deleted_ledger = [];
+  if (typeof store._sync_version !== 'number') store._sync_version = 1;
+  if (!store._sync_updated_at) store._sync_updated_at = new Date().toISOString();
 
-  // Ensure deleted ledger exists
-  if (!Array.isArray(store._deleted_ledger)) {
-    store._deleted_ledger = [];
-  }
-
-  // ── CRITICAL: Always ensure master admin exists ───────────────────────────
+  // Always ensure master admin
   if (!store.rla_users || Object.keys(store.rla_users).length === 0 ||
       !store.rla_users['master_admin_001']) {
-    console.warn('[RLA-CRM] Master admin missing from cloud — re-seeding…');
+    console.warn('[RLA-CRM] Master admin missing — re-seeding…');
     if (!store.rla_users) store.rla_users = {};
     store.rla_users['master_admin_001'] = {
       ...MASTER_ADMIN_SEED,
@@ -150,7 +145,6 @@ async function readStore() {
 }
 
 async function writeStore(store) {
-  // Always ensure master admin is present before every write
   if (!store.rla_users) store.rla_users = {};
   if (!store.rla_users['master_admin_001']) {
     store.rla_users['master_admin_001'] = {
@@ -158,39 +152,32 @@ async function writeStore(store) {
       sync_updated_at: new Date().toISOString(),
     };
   }
+  if (!Array.isArray(store._deleted_ledger)) store._deleted_ledger = [];
 
-  // Ensure deleted ledger exists
-  if (!Array.isArray(store._deleted_ledger)) {
-    store._deleted_ledger = [];
-  }
+  // ── Bump sync version on every write ──────────────────────────────────────
+  store._sync_version   = (store._sync_version || 0) + 1;
+  store._sync_updated_at = new Date().toISOString();
 
   const ok = await writeBlob(PRIMARY_BLOB_ID, store);
   if (!ok) {
     console.warn('[RLA-CRM] Primary blob write failed, attempting recreate…');
     const newId = await createBlob(store);
     if (newId) {
-      console.warn(`[RLA-CRM] New blob created: ${newId} (update PRIMARY_BLOB_ID in worker)`);
+      console.warn(`[RLA-CRM] New blob: ${newId} — update PRIMARY_BLOB_ID in worker`);
     }
     throw new Error('Storage write failed — please retry');
   }
-  return true;
+  return store._sync_version;
 }
 
 // ── Append to deleted ledger ──────────────────────────────────────────────────
 function appendToLedger(store, collection, id) {
-  if (!Array.isArray(store._deleted_ledger)) {
-    store._deleted_ledger = [];
-  }
-  // Avoid duplicate entries for the same id+collection
+  if (!Array.isArray(store._deleted_ledger)) store._deleted_ledger = [];
+  // Remove any previous entry for this id+collection to avoid duplicates
   store._deleted_ledger = store._deleted_ledger.filter(
     e => !(e.collection === collection && e.id === id)
   );
-  store._deleted_ledger.push({
-    collection,
-    id,
-    deletedAt: new Date().toISOString(),
-  });
-  // Prune to max size (keep most recent)
+  store._deleted_ledger.push({ collection, id, deletedAt: new Date().toISOString() });
   if (store._deleted_ledger.length > MAX_LEDGER_ENTRIES) {
     store._deleted_ledger = store._deleted_ledger.slice(
       store._deleted_ledger.length - MAX_LEDGER_ENTRIES
@@ -204,35 +191,49 @@ export async function onRequest(context) {
   const url  = new URL(request.url);
   const path = (params.path || []).join('/');
 
-  // Preflight
   if (request.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
-  // ── Health check ────────────────────────────────────────────────────────────
+  // ── Health ──────────────────────────────────────────────────────────────────
   if (path === 'health' || path === 'health/') {
-    let blobStatus = 'ok';
-    let userCount  = 0;
-    let ledgerSize = 0;
+    let blobStatus = 'ok', userCount = 0, ledgerSize = 0, version = 0;
     try {
       const store = await readStore();
-      userCount   = Object.keys(store.rla_users || {}).length;
-      ledgerSize  = (store._deleted_ledger || []).length;
+      userCount  = Object.keys(store.rla_users || {}).length;
+      ledgerSize = (store._deleted_ledger || []).length;
+      version    = store._sync_version || 0;
     } catch (e) {
       blobStatus = 'degraded: ' + e.message;
     }
     return json({
       status: blobStatus === 'ok' ? 'ok' : 'degraded',
-      service: 'RLA CRM Sync API v6',
-      storage: 'jsonblob-dual (global-persistent)',
+      service: 'RLA CRM Sync API v7',
+      storage: 'jsonblob (global-persistent)',
       blobId: PRIMARY_BLOB_ID,
       userCount,
       deletedLedgerSize: ledgerSize,
+      syncVersion: version,
       timestamp: new Date().toISOString(),
     });
   }
 
-  // ── GET ALL: single-request pull for all collections + deleted ledger ────────
+  // ── VERSION POLL (lightweight) ──────────────────────────────────────────────
+  // Flutter polls this every 5s. Returns only { version, updatedAt }.
+  // If version > lastKnown → trigger full /all fetch. Otherwise skip.
+  if (path === 'version' || path === 'version/') {
+    try {
+      const store = await readStore();
+      return json({
+        version:   store._sync_version   || 1,
+        updatedAt: store._sync_updated_at || new Date().toISOString(),
+      });
+    } catch (e) {
+      return json({ error: e.message }, 500);
+    }
+  }
+
+  // ── GET ALL ─────────────────────────────────────────────────────────────────
   if (request.method === 'GET' && (path === 'all' || path === 'all/')) {
     try {
       const store = await readStore();
@@ -241,16 +242,17 @@ export async function onRequest(context) {
         result[col] = Object.values(store[col] || {});
       }
       return json({
-        collections:     result,
-        deleted_ledger:  store._deleted_ledger || [],
-        storage:         'jsonblob-v6',
+        collections:    result,
+        deleted_ledger: store._deleted_ledger || [],
+        version:        store._sync_version   || 1,
+        storage:        'jsonblob-v7',
       });
     } catch (e) {
       return json({ error: e.message }, 500);
     }
   }
 
-  // ── Auth gate for writes ────────────────────────────────────────────────────
+  // ── Auth gate ───────────────────────────────────────────────────────────────
   const syncKey = request.headers.get('X-Sync-Key');
   if ((request.method === 'POST' || request.method === 'DELETE') &&
       syncKey !== API_SECRET) {
@@ -275,18 +277,22 @@ export async function onRequest(context) {
           return !ts || new Date(ts) >= sinceDate;
         });
       }
-      return json({ records, count: records.length, storage: 'jsonblob-v6', collection });
+      return json({
+        records, count: records.length,
+        storage: 'jsonblob-v7', collection,
+        version: store._sync_version || 1,
+      });
     } catch (e) {
       return json({ error: e.message, records: [] }, 500);
     }
   }
 
-  // ── POST: upsert ────────────────────────────────────────────────────────────
+  // ── POST: upsert ─────────────────────────────────────────────────────────────
   if (request.method === 'POST') {
     try {
       const body = await request.json();
       if (!body || !body.id) {
-        return json({ error: 'Body must be JSON with an "id" field' }, 400);
+        return json({ error: 'Body must have "id" field' }, 400);
       }
       body.sync_updated_at = new Date().toISOString();
 
@@ -294,46 +300,38 @@ export async function onRequest(context) {
       if (!store[collection]) store[collection] = {};
       store[collection][body.id] = body;
 
-      // If this ID was previously in the ledger (deleted then re-added),
-      // remove it from the ledger so it won't be deleted again on other clients.
+      // If this record was previously in the ledger (deleted then re-added),
+      // remove it so other clients won't delete it again.
       if (Array.isArray(store._deleted_ledger)) {
         store._deleted_ledger = store._deleted_ledger.filter(
           e => !(e.collection === collection && e.id === body.id)
         );
       }
 
-      await writeStore(store);
-      return json({ success: true, id: body.id, storage: 'jsonblob-v6' });
+      const newVersion = await writeStore(store);
+      return json({ success: true, id: body.id, version: newVersion, storage: 'jsonblob-v7' });
     } catch (e) {
       return json({ error: e.message }, 500);
     }
   }
 
-  // ── DELETE ──────────────────────────────────────────────────────────────────
+  // ── DELETE ───────────────────────────────────────────────────────────────────
   if (request.method === 'DELETE') {
     try {
       const id = url.searchParams.get('id');
       if (!id) return json({ error: '"id" param required' }, 400);
 
-      // Protect master admin from deletion
       if (collection === 'rla_users' && id === 'master_admin_001') {
         return json({ error: 'Master admin cannot be deleted' }, 403);
       }
 
       const store = await readStore();
-
-      // Remove from the collection
       if (store[collection] && store[collection][id]) {
         delete store[collection][id];
       }
-
-      // ── CRITICAL: Record deletion in the ledger ───────────────────────────
-      // Every other client will read this ledger on their next sync and
-      // delete the matching record from their local Hive box.
       appendToLedger(store, collection, id);
-
-      await writeStore(store);
-      return json({ success: true, id, ledgerSize: store._deleted_ledger.length });
+      const newVersion = await writeStore(store);
+      return json({ success: true, id, version: newVersion, ledgerSize: store._deleted_ledger.length });
     } catch (e) {
       return json({ error: e.message }, 500);
     }

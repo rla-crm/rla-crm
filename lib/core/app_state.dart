@@ -32,10 +32,25 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   List<ApprovalRequest> _approvals = [];
   List<EmailLog> _emailLogs = [];
 
-  // ─── Periodic sync timer ─────────────────────────────────────────────────
-  Timer? _syncTimer;
-  // Sync every 15 seconds — JSONBlob is globally persistent so this is safe
-  static const Duration _syncInterval = Duration(seconds: 15);
+  // ─── Real-time sync infrastructure ────────────────────────────────────────
+  // Two-timer approach for near-real-time cross-device sync:
+  //
+  //  _versionTimer  (every 5s, lightweight)
+  //    → polls GET /api/sync/version (a single integer)
+  //    → only triggers a full pullAll when version has changed
+  //    → makes "is there anything new?" essentially free
+  //
+  //  _immediateTimer (one-shot, fires 2s after any local write)
+  //    → triggers a full pullAll shortly after a write so THIS device
+  //      immediately reflects the saved state (confirms cloud write)
+  //
+  // Together these ensure:
+  //   - Any write by Admin is visible to Sales within ≤5 seconds
+  //   - Any local save is confirmed from cloud within 2 seconds
+  //   - No unnecessary full pulls when nothing has changed
+  Timer? _versionTimer;
+  Timer? _immediateTimer;
+  static const Duration _versionPollInterval = Duration(seconds: 5);
   bool _syncInProgress = false;
 
   // ─── Tombstone sets: IDs deleted locally that must NOT be re-pulled from cloud ─
@@ -446,7 +461,12 @@ RLA CRM Platform
     // Register lifecycle observer (sync on app resume)
     WidgetsBinding.instance.addObserver(this);
 
-    // Start periodic sync timer (every 15s)
+    // ── Wire up post-write immediate sync ─────────────────────────────────────
+    // Whenever SyncService successfully writes to the cloud, schedule a
+    // re-pull 2s later so this device immediately sees the confirmed state.
+    SyncService.onWriteSuccess = _scheduleImmediateSync;
+
+    // Start real-time version polling (every 5s, lightweight)
     _startPeriodicSync();
   }
 
@@ -475,28 +495,49 @@ RLA CRM Platform
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      // Force a full pull on resume (covers returning from background)
       SyncService.resetAvailability();
+      SyncService.resetVersion();
       _syncFromCloud();
     }
   }
 
-  // ── Periodic sync timer ───────────────────────────────────────────────────
+  // ── Real-time version polling ─────────────────────────────────────────────
+  // Polls GET /api/sync/version every 5s. Only fetches full data when changed.
   void _startPeriodicSync() {
-    _syncTimer?.cancel();
-    _syncTimer = Timer.periodic(_syncInterval, (_) async {
-      await _syncFromCloud();
+    _versionTimer?.cancel();
+    _versionTimer = Timer.periodic(_versionPollInterval, (_) async {
+      // Lightweight check: is there anything new on the server?
+      final changed = await SyncService.hasCloudChanged();
+      if (changed) {
+        if (kDebugMode) debugPrint('🔄 Cloud version changed — pulling full sync');
+        await _syncFromCloud();
+      }
     });
   }
 
   void _stopPeriodicSync() {
-    _syncTimer?.cancel();
-    _syncTimer = null;
+    _versionTimer?.cancel();
+    _versionTimer = null;
+    _immediateTimer?.cancel();
+    _immediateTimer = null;
+  }
+
+  /// Schedule a full sync 2 seconds from now.
+  /// Called after any local write so this device quickly confirms the saved state.
+  void _scheduleImmediateSync() {
+    _immediateTimer?.cancel();
+    _immediateTimer = Timer(const Duration(seconds: 2), () async {
+      SyncService.resetVersion(); // force a full pull regardless of version
+      await _syncFromCloud();
+    });
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _stopPeriodicSync();
+    SyncService.stopRetryTimer();
     super.dispose();
   }
 
@@ -764,23 +805,28 @@ RLA CRM Platform
 
   void _saveUser(AppUser u) {
     _usersBox.put(u.id, jsonEncode(u.toMap()));
-    _syncUser(u); // push to cloud in background
+    _syncUser(u);
+    _scheduleImmediateSync();
   }
   void _saveLead(Lead l) {
     _leadsBox.put(l.id, jsonEncode(l.toMap()));
     _syncLead(l);
+    _scheduleImmediateSync();
   }
   void _saveNotification(CrmNotification n) {
     _notifBox.put(n.id, jsonEncode(n.toMap()));
     _syncNotification(n);
+    // Notifications don't need immediate re-sync (read status changes are local-only)
   }
   void _saveProject(RealEstateProject p) {
     _projectsBox.put(p.id, jsonEncode(p.toMap()));
     _syncProject(p);
+    _scheduleImmediateSync();
   }
   void _saveApproval(ApprovalRequest a) {
     _approvalsBox.put(a.id, jsonEncode(a.toMap()));
     _syncApproval(a);
+    _scheduleImmediateSync();
   }
   void _saveEmailLog(EmailLog e) => _emailLogsBox.put(e.id, jsonEncode(e.toMap()));
 
@@ -1323,6 +1369,7 @@ RLA CRM Platform
   void deleteLead(String id) {
     _deletedLeadIds.add(id);          // tombstone: prevent re-pull from cloud
     _leadsBox.delete(id);             // remove locally
+    _scheduleImmediateSync();         // verify deletion is reflected quickly
     _loadAll();
     notifyListeners();
     // Fire cloud delete — if it fails, tombstone prevents re-pull on next sync
