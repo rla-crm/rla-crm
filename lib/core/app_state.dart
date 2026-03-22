@@ -38,6 +38,13 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   static const Duration _syncInterval = Duration(seconds: 15);
   bool _syncInProgress = false;
 
+  // ─── Tombstone sets: IDs deleted locally that must NOT be re-pulled from cloud ─
+  final Set<String> _deletedLeadIds      = {};
+  final Set<String> _deletedProjectIds   = {};
+  final Set<String> _deletedUserIds      = {};
+  final Set<String> _deletedApprovalIds  = {};
+  final Set<String> _deletedNotifIds     = {};
+
   // ─── Getters ─────────────────────────────────────────────────────────────
   AppUser? get currentUser => _currentUser;
   List<AppUser> get users => List.unmodifiable(_users);
@@ -131,18 +138,34 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   List<RealEstateProject> get myProjects {
     if (isMasterAdmin) return _projects;
     if (isCompanyAdmin) return companyProjects;
-    return companyProjects.where((p) => p.assignedSalesIds.contains(_currentUser?.id)).toList();
+    // Sales: see a project if they are in assignedSalesIds OR if the project
+    // matches their companyId (i.e. they belong to this project's company/team).
+    // This covers newly-approved users who haven't been explicitly added to
+    // assignedSalesIds yet, and users assigned directly through the project sheet.
+    final uid = _currentUser?.id;
+    final cid = currentCompanyId;
+    return companyProjects.where((p) =>
+        (uid != null && p.assignedSalesIds.contains(uid)) ||
+        (cid != null && (p.companyId == cid || p.id == cid))
+    ).toList();
   }
 
   List<Lead> get myLeads {
     if (isMasterAdmin) return _leads;
     if (isCompanyAdmin) return companyLeads;
-    return companyLeads.where((l) => l.assignedToId == _currentUser?.id).toList();
+    // Sales: see leads assigned to them OR leads belonging to their projects
+    final uid = _currentUser?.id;
+    final myProjectIds = myProjects.map((p) => p.id).toSet();
+    return companyLeads.where((l) =>
+        (uid != null && l.assignedToId == uid) ||
+        myProjectIds.contains(l.projectId)
+    ).toList();
   }
 
   List<Lead> myLeadsForProject(String projectId) {
     if (isAdmin) return companyLeads.where((l) => l.projectId == projectId).toList();
-    return companyLeads.where((l) => l.projectId == projectId && l.assignedToId == _currentUser?.id).toList();
+    // Sales can see all leads in their project, not just their own assigned leads
+    return companyLeads.where((l) => l.projectId == projectId).toList();
   }
 
   List<AppUser> get salesUsers =>
@@ -522,6 +545,8 @@ RLA CRM Platform
         try {
           final l = Lead.fromMap(raw);
           remoteLeadIds.add(l.id);
+          // Skip leads that were deleted locally — do not restore them
+          if (_deletedLeadIds.contains(l.id)) continue;
           _leadsBox.put(l.id, jsonEncode(l.toMap()));
           mergedCount++;
         } catch (e) {
@@ -535,6 +560,8 @@ RLA CRM Platform
         try {
           final p = RealEstateProject.fromMap(raw);
           remoteProjectIds.add(p.id);
+          // Skip projects deleted locally
+          if (_deletedProjectIds.contains(p.id)) continue;
           _projectsBox.put(p.id, jsonEncode(p.toMap()));
           mergedCount++;
         } catch (e) {
@@ -548,6 +575,7 @@ RLA CRM Platform
         try {
           final a = ApprovalRequest.fromMap(raw);
           remoteApprovalIds.add(a.id);
+          if (_deletedApprovalIds.contains(a.id)) continue;
           _approvalsBox.put(a.id, jsonEncode(a.toMap()));
           mergedCount++;
         } catch (e) {
@@ -561,6 +589,7 @@ RLA CRM Platform
         try {
           final n = CrmNotification.fromMap(raw);
           remoteNotifIds.add(n.id);
+          if (_deletedNotifIds.contains(n.id)) continue;
           _notifBox.put(n.id, jsonEncode(n.toMap()));
           mergedCount++;
         } catch (e) {
@@ -573,6 +602,7 @@ RLA CRM Platform
       int pushedCount = 0;
 
       for (final key in _usersBox.keys) {
+        if (_deletedUserIds.contains(key)) continue;
         if (!remoteUserIds.contains(key)) {
           try {
             final u = AppUser.fromMap(Map<String, dynamic>.from(jsonDecode(_usersBox.get(key))));
@@ -582,6 +612,8 @@ RLA CRM Platform
         }
       }
       for (final key in _leadsBox.keys) {
+        // Do not push leads that were locally deleted (they stay tombstoned)
+        if (_deletedLeadIds.contains(key)) continue;
         if (!remoteLeadIds.contains(key)) {
           try {
             final l = Lead.fromMap(Map<String, dynamic>.from(jsonDecode(_leadsBox.get(key))));
@@ -591,6 +623,7 @@ RLA CRM Platform
         }
       }
       for (final key in _projectsBox.keys) {
+        if (_deletedProjectIds.contains(key)) continue;
         if (!remoteProjectIds.contains(key)) {
           try {
             final p = RealEstateProject.fromMap(Map<String, dynamic>.from(jsonDecode(_projectsBox.get(key))));
@@ -600,6 +633,7 @@ RLA CRM Platform
         }
       }
       for (final key in _approvalsBox.keys) {
+        if (_deletedApprovalIds.contains(key)) continue;
         if (!remoteApprovalIds.contains(key)) {
           try {
             final a = ApprovalRequest.fromMap(Map<String, dynamic>.from(jsonDecode(_approvalsBox.get(key))));
@@ -609,6 +643,7 @@ RLA CRM Platform
         }
       }
       for (final key in _notifBox.keys) {
+        if (_deletedNotifIds.contains(key)) continue;
         if (!remoteNotifIds.contains(key)) {
           try {
             final n = CrmNotification.fromMap(Map<String, dynamic>.from(jsonDecode(_notifBox.get(key))));
@@ -807,6 +842,12 @@ RLA CRM Platform
 
   void logout() {
     _currentUser = null;
+    // Clear tombstones on logout so a fresh session sees all data
+    _deletedLeadIds.clear();
+    _deletedProjectIds.clear();
+    _deletedUserIds.clear();
+    _deletedApprovalIds.clear();
+    _deletedNotifIds.clear();
     notifyListeners();
   }
 
@@ -952,6 +993,38 @@ RLA CRM Platform
       );
       _saveUser(user);
       _saveApproval(req);
+
+      // ── CRITICAL: Auto-add sales user to project's assignedSalesIds ──────────
+      // This ensures the sales user sees their project immediately upon approval,
+      // without requiring the admin to manually edit the project.
+      if (role == UserRole.sales && req.companyId != null) {
+        try {
+          final proj = _projects.firstWhere((p) => p.id == req.companyId);
+          if (!proj.assignedSalesIds.contains(user.id)) {
+            final updatedProj = RealEstateProject(
+              id: proj.id,
+              name: proj.name,
+              location: proj.location,
+              description: proj.description,
+              developerName: proj.developerName,
+              propertyType: proj.propertyType,
+              priceFrom: proj.priceFrom,
+              priceTo: proj.priceTo,
+              status: proj.status,
+              assignedSalesIds: [...proj.assignedSalesIds, user.id],
+              createdById: proj.createdById,
+              createdByName: proj.createdByName,
+              createdAt: proj.createdAt,
+              updatedAt: DateTime.now(),
+              totalUnits: proj.totalUnits,
+              reraNumber: proj.reraNumber,
+              companyId: proj.companyId,
+            );
+            _saveProject(updatedProj);
+          }
+        } catch (_) {}
+      }
+
       _loadAll();
       notifyListeners();
 
@@ -1141,12 +1214,24 @@ RLA CRM Platform
   // ─── CRUD: Projects ───────────────────────────────────────────────────────
   void addProject(RealEstateProject p) { _saveProject(p); _loadAll(); notifyListeners(); }
   void updateProject(RealEstateProject p) { p.updatedAt = DateTime.now(); _saveProject(p); _loadAll(); notifyListeners(); }
-  void deleteProject(String id) { _projectsBox.delete(id); SyncService.delete(SyncService.kProjects, id); _loadAll(); notifyListeners(); }
+  void deleteProject(String id) {
+    _deletedProjectIds.add(id);
+    _projectsBox.delete(id);
+    _loadAll();
+    notifyListeners();
+    SyncService.delete(SyncService.kProjects, id);
+  }
 
   // ─── CRUD: Users ──────────────────────────────────────────────────────────
   void addUser(AppUser u) { _saveUser(u); _loadAll(); notifyListeners(); }
   void updateUser(AppUser u) { _saveUser(u); _loadAll(); notifyListeners(); }
-  void deleteUser(String id) { _usersBox.delete(id); SyncService.delete(SyncService.kUsers, id); _loadAll(); notifyListeners(); }
+  void deleteUser(String id) {
+    _deletedUserIds.add(id);
+    _usersBox.delete(id);
+    _loadAll();
+    notifyListeners();
+    SyncService.delete(SyncService.kUsers, id);
+  }
 
   /// Add a user and also assign them to the given project's assignedSalesIds list.
   void addUserAndAssignToProject(AppUser u, String? projectId) {
@@ -1200,11 +1285,26 @@ RLA CRM Platform
   // ─── CRUD: Leads ──────────────────────────────────────────────────────────
   void addLead(Lead l) { _saveLead(l); _loadAll(); notifyListeners(); }
   void updateLead(Lead l) { l.updatedAt = DateTime.now(); _saveLead(l); _loadAll(); notifyListeners(); }
-  void deleteLead(String id) { _leadsBox.delete(id); SyncService.delete(SyncService.kLeads, id); _loadAll(); notifyListeners(); }
+  void deleteLead(String id) {
+    _deletedLeadIds.add(id);          // tombstone: prevent re-pull from cloud
+    _leadsBox.delete(id);             // remove locally
+    _loadAll();
+    notifyListeners();
+    // Fire cloud delete — if it fails, tombstone prevents re-pull on next sync
+    SyncService.delete(SyncService.kLeads, id).then((ok) {
+      if (!ok && kDebugMode) debugPrint('⚠️ Cloud delete failed for lead $id — tombstoned locally');
+    });
+  }
 
   // ─── CRUD: Notifications ──────────────────────────────────────────────────
   void addNotification(CrmNotification n) { _saveNotification(n); _loadAll(); notifyListeners(); }
-  void deleteNotification(String id) { _notifBox.delete(id); SyncService.delete(SyncService.kNotifications, id); _loadAll(); notifyListeners(); }
+  void deleteNotification(String id) {
+    _deletedNotifIds.add(id);
+    _notifBox.delete(id);
+    _loadAll();
+    notifyListeners();
+    SyncService.delete(SyncService.kNotifications, id);
+  }
   void markNotificationRead(String id) {
     try {
       final n = _notifications.firstWhere((n) => n.id == id);
