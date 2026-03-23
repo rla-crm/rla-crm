@@ -281,7 +281,8 @@ class _UserSheetState extends State<_UserSheet> {
   late final TextEditingController _emailCtrl;
   late final TextEditingController _passCtrl;
   UserRole _role = UserRole.sales;
-  String? _selectedProjectId;
+  // Multi-project selection for sales users
+  final Set<String> _selectedProjectIds = {};
   bool _obscure = true;
 
   @override
@@ -292,18 +293,19 @@ class _UserSheetState extends State<_UserSheet> {
     _emailCtrl = TextEditingController(text: e?.email ?? '');
     _passCtrl = TextEditingController(text: e?.password ?? '');
     _role = e?.role ?? UserRole.sales;
-    // For editing an existing user, pre-select their project
-    if (e != null && e.companyId != null) {
-      // For sales users, try to find which project they belong to
-      final state = widget.state;
-      if (e.role == UserRole.sales) {
-        // Find project where this user is assigned
-        final proj = state.companyProjects.where((p) => p.id == e.companyId || p.assignedSalesIds.contains(e.id)).firstOrNull;
-        _selectedProjectId = proj?.id ?? e.companyId;
+    if (e != null) {
+      // Pre-populate selected project IDs from the user's existing assignments
+      _selectedProjectIds.addAll(e.projectIds);
+      // Also scan projects where this user is in assignedSalesIds (backward compat)
+      for (final p in widget.state.companyProjects) {
+        if (p.assignedSalesIds.contains(e.id)) {
+          _selectedProjectIds.add(p.id);
+        }
       }
     } else {
-      // Default to the admin's own project
-      _selectedProjectId = widget.state.currentCompanyId;
+      // Default: select the admin's own project
+      final defaultId = widget.state.currentCompanyId;
+      if (defaultId != null) _selectedProjectIds.add(defaultId);
     }
   }
 
@@ -336,10 +338,10 @@ class _UserSheetState extends State<_UserSheet> {
       return;
     }
 
-    // For sales users, require project selection
-    if (_role == UserRole.sales && _selectedProjectId == null) {
+    // For sales users, require at least one project selection
+    if (_role == UserRole.sales && _selectedProjectIds.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Please select a project for the sales user.', style: GoogleFonts.inter(fontSize: 12)),
+        content: Text('Please select at least one project for the sales user.', style: GoogleFonts.inter(fontSize: 12)),
         backgroundColor: const Color(0xFFD04060),
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -347,20 +349,24 @@ class _UserSheetState extends State<_UserSheet> {
       return;
     }
 
-    // Determine companyId for the user
-    // For sales: use selected project id; for admin: use admin's own companyId
-    final assignCompanyId = _role == UserRole.sales
-        ? (_selectedProjectId ?? state.currentCompanyId)
+    // Determine primary companyId (first selected project or admin's own)
+    final primaryProjectId = _selectedProjectIds.isNotEmpty
+        ? _selectedProjectIds.first
         : state.currentCompanyId;
 
-    // Get project name for companyName field
-    String? companyName = state.currentUser?.companyName;
-    if (_role == UserRole.sales && _selectedProjectId != null) {
-      try {
-        final proj = state.projects.firstWhere((p) => p.id == _selectedProjectId);
-        companyName = proj.name;
-      } catch (_) {}
+    // Build companyName from selected projects
+    String? companyName;
+    if (_role == UserRole.sales && _selectedProjectIds.isNotEmpty) {
+      final projNames = _selectedProjectIds.map((pid) {
+        try { return state.projects.firstWhere((p) => p.id == pid).name; } catch (_) { return ''; }
+      }).where((n) => n.isNotEmpty).toList();
+      companyName = projNames.join(', ');
+    } else {
+      companyName = state.currentUser?.companyName;
     }
+
+    // For companyAdmin role, use admin's own companyId
+    final assignCompanyId = _role == UserRole.sales ? primaryProjectId : state.currentCompanyId;
 
     final user = AppUser(
       id: widget.existing?.id,
@@ -371,18 +377,31 @@ class _UserSheetState extends State<_UserSheet> {
       companyId: assignCompanyId,
       companyName: companyName,
       isActive: widget.existing?.isActive ?? true,
-      isApproved: true, // Admin directly creates = pre-approved
+      isApproved: true,
       createdAt: widget.existing?.createdAt,
+      projectIds: _role == UserRole.sales ? _selectedProjectIds.toList() : widget.existing?.projectIds ?? [],
     );
+
     if (widget.existing != null) {
+      // For updates: also sync project assignments
       state.updateUser(user);
+      // Sync assignedSalesIds on each project
+      if (_role == UserRole.sales) {
+        state.assignSalesToProjects(userId: user.id, projectIds: _selectedProjectIds.toList());
+      }
     } else {
-      state.addUserAndAssignToProject(user, _selectedProjectId);
+      // For new users: use primary project for backward compat
+      state.addUserAndAssignToProject(user, primaryProjectId);
+      // Additionally assign to any extra selected projects
+      if (_role == UserRole.sales && _selectedProjectIds.length > 1) {
+        final extraProjects = _selectedProjectIds.where((pid) => pid != primaryProjectId).toList();
+        state.assignSalesToProjects(userId: user.id, projectIds: extraProjects);
+      }
     }
     Navigator.pop(context);
     if (widget.existing == null) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('${user.name} added to your team!', style: GoogleFonts.inter(fontSize: 12)),
+        content: Text('${user.name} added to ${_selectedProjectIds.length} project(s)!', style: GoogleFonts.inter(fontSize: 12)),
         backgroundColor: const Color(0xFF3B8A6E),
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -447,43 +466,46 @@ class _UserSheetState extends State<_UserSheet> {
                 );
               }).toList(),
             ),
-            // ── Project Assignment (for Sales role) ──
+            // ── Multi-Project Assignment (for Sales role) ──
             if (_role == UserRole.sales && availableProjects.isNotEmpty) ...[
               const SizedBox(height: 14),
-              Text('Assign to Project *', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+              Text(
+                'Assign to Projects * (${_selectedProjectIds.length} selected)',
+                style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary),
+              ),
               const SizedBox(height: 8),
-              Container(
-                decoration: BoxDecoration(
-                  color: AppColors.surface,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(
-                    color: _selectedProjectId == null ? AppColors.peach.withValues(alpha: 0.6) : AppColors.lavender,
-                    width: 1.5,
-                  ),
-                ),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<String>(
-                    value: _selectedProjectId,
-                    isExpanded: true,
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    borderRadius: BorderRadius.circular(14),
-                    hint: Text('Select project...', style: GoogleFonts.inter(fontSize: 13, color: AppColors.textMuted)),
-                    items: availableProjects.map((p) => DropdownMenuItem(
-                      value: p.id,
+              ...availableProjects.map((p) {
+                final isSel = _selectedProjectIds.contains(p.id);
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: GestureDetector(
+                    onTap: () => setState(() {
+                      if (isSel) _selectedProjectIds.remove(p.id);
+                      else _selectedProjectIds.add(p.id);
+                    }),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: isSel ? AppColors.lavender.withValues(alpha: 0.1) : AppColors.surface,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: isSel ? AppColors.lavender.withValues(alpha: 0.5) : AppColors.border,
+                            width: isSel ? 1.5 : 1),
+                      ),
                       child: Row(children: [
                         Container(width: 8, height: 8, margin: const EdgeInsets.only(right: 8),
                             decoration: BoxDecoration(shape: BoxShape.circle, color: p.status.color)),
-                        Expanded(child: Text(p.name, style: GoogleFonts.inter(fontSize: 13, color: AppColors.textPrimary), overflow: TextOverflow.ellipsis)),
+                        Expanded(child: Text(p.name, style: GoogleFonts.inter(fontSize: 13, fontWeight: isSel ? FontWeight.w600 : FontWeight.w400, color: AppColors.textPrimary), overflow: TextOverflow.ellipsis)),
+                        if (isSel) const Icon(Icons.check_circle_rounded, color: AppColors.lavender, size: 18),
                       ]),
-                    )).toList(),
-                    onChanged: (v) => setState(() => _selectedProjectId = v),
+                    ),
                   ),
-                ),
-              ),
-              if (_selectedProjectId == null)
+                );
+              }),
+              if (_selectedProjectIds.isEmpty)
                 Padding(
                   padding: const EdgeInsets.only(top: 4),
-                  child: Text('* Required for sales team members', style: GoogleFonts.inter(fontSize: 10, color: AppColors.peach)),
+                  child: Text('* Select at least one project', style: GoogleFonts.inter(fontSize: 10, color: AppColors.peach)),
                 ),
             ],
             const SizedBox(height: 20),

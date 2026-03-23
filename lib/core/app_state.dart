@@ -76,6 +76,10 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   String? get currentCompanyId => _currentUser?.companyId;
 
+  /// All project IDs the current user is associated with.
+  /// For project admins this is all their managed projects; for sales all assigned projects.
+  List<String> get currentProjectIds => _currentUser?.projectIds ?? [];
+
   // currentCompany is no longer a Company object — returns null (company module removed)
   // For compatibility, kept as a getter returning null
   dynamic get currentCompany => null;
@@ -90,9 +94,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   List<ApprovalRequest> get masterAdminPendingApprovals {
     return pendingApprovals.where((a) {
       if (a.type != ApprovalType.employeeSignup) return false;
-      // Check if the project has an active admin
+      // Check if the project has ANY active admin (using projectIds for multi-project support)
       final hasProjectAdmin = _users.any((u) =>
-          u.companyId == a.companyId &&
+          (u.companyId == a.companyId || u.projectIds.contains(a.companyId)) &&
           u.role == UserRole.companyAdmin &&
           u.isApproved &&
           u.isActive);
@@ -103,10 +107,13 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   List<ApprovalRequest> get companyPendingApprovals {
     if (!isCompanyAdmin) return [];
+    // Include approvals for any of the admin's managed projects
+    final myPids = currentProjectIds.toSet();
+    if (currentCompanyId != null) myPids.add(currentCompanyId!);
     return pendingApprovals
         .where((a) =>
             a.type == ApprovalType.employeeSignup &&
-            a.companyId == currentCompanyId)
+            (a.companyId != null && myPids.contains(a.companyId)))
         .toList();
   }
 
@@ -117,51 +124,62 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   // ─── Project-scoped getters ───────────────────────────────────────────────
-  // NOTE: For project admins created by master admin, their companyId == projectId.
-  // Projects created by master admin start with companyId='rla_platform' until an admin is assigned.
-  // We match on BOTH p.companyId == currentCompanyId AND p.id == currentCompanyId.
+  // Multi-project support:
+  // - Project admins can manage multiple projects (stored in projectIds).
+  // - Projects match when p.id is in the user's projectIds, or via legacy companyId/p.companyId.
   List<RealEstateProject> get companyProjects {
     if (isMasterAdmin) return _projects;
+    // Multi-project: match any project whose ID is in the user's projectIds,
+    // or via legacy companyId/p.companyId matching.
+    final pids = currentProjectIds.toSet();
     final cid = currentCompanyId;
-    if (cid == null) return [];
-    return _projects.where((p) => p.companyId == cid || p.id == cid).toList();
+    if (pids.isEmpty && cid == null) return [];
+    return _projects.where((p) =>
+        pids.contains(p.id) ||
+        (cid != null && (p.companyId == cid || p.id == cid))
+    ).toList();
   }
 
   List<AppUser> get companyUsers {
     if (isMasterAdmin) return _users;
-    final cid = currentCompanyId;
-    if (cid == null) return [];
-    return _users.where((u) => u.companyId == cid).toList();
+    // Include all users who share at least one project with the current user.
+    final myProjIds = companyProjects.map((p) => p.id).toSet();
+    if (myProjIds.isEmpty) return [];
+    return _users.where((u) =>
+        u.projectIds.any((pid) => myProjIds.contains(pid)) ||
+        (u.companyId != null && myProjIds.contains(u.companyId))
+    ).toList();
   }
 
   List<Lead> get companyLeads {
     if (isMasterAdmin) return _leads;
-    final cid = currentCompanyId;
-    if (cid == null) return [];
     final myProjectIds = companyProjects.map((p) => p.id).toSet();
-    return _leads.where((l) => l.companyId == cid || myProjectIds.contains(l.projectId)).toList();
+    if (myProjectIds.isEmpty) return [];
+    return _leads.where((l) => myProjectIds.contains(l.projectId)).toList();
   }
 
   List<CrmNotification> get companyNotifications {
     if (isMasterAdmin) return _notifications;
     final cid = currentCompanyId;
-    if (cid == null) return [];
-    return _notifications.where((n) => n.companyId == cid || n.isForAll).toList();
+    final pids = currentProjectIds.toSet();
+    if (cid == null && pids.isEmpty) return [];
+    return _notifications.where((n) =>
+        n.companyId == cid ||
+        (n.projectId != null && pids.contains(n.projectId)) ||
+        n.isForAll).toList();
   }
 
   // ─── Role-based project/lead getters ─────────────────────────────────────
   List<RealEstateProject> get myProjects {
     if (isMasterAdmin) return _projects;
     if (isCompanyAdmin) return companyProjects;
-    // Sales: see a project if they are in assignedSalesIds OR if the project
-    // matches their companyId (i.e. they belong to this project's company/team).
-    // This covers newly-approved users who haven't been explicitly added to
-    // assignedSalesIds yet, and users assigned directly through the project sheet.
+    // Sales: see a project if they are in assignedSalesIds OR the project is
+    // in their projectIds list (multi-project support).
     final uid = _currentUser?.id;
-    final cid = currentCompanyId;
-    return companyProjects.where((p) =>
+    final myPids = currentProjectIds.toSet();
+    return _projects.where((p) =>
         (uid != null && p.assignedSalesIds.contains(uid)) ||
-        (cid != null && (p.companyId == cid || p.id == cid))
+        myPids.contains(p.id)
     ).toList();
   }
 
@@ -287,7 +305,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       .where((l) => l.status == LeadStatus.closed && l.closedValue != null)
       .fold(0.0, (sum, l) => sum + l.closedValue!);
 
-  /// Returns per-project stats including admin info and revenue.
+  /// Returns per-project stats including all admin info and revenue.
   Map<String, Map<String, dynamic>> get allProjectsStats {
     final map = <String, Map<String, dynamic>>{};
     for (final p in _projects) {
@@ -296,13 +314,15 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       final revenue = closedLeads
           .where((l) => l.closedValue != null)
           .fold(0.0, (double sum, l) => sum + l.closedValue!);
-      String adminName = 'No admin assigned';
-      try {
-        final admin = _users.firstWhere(
-          (u) => u.companyId == p.id && u.role == UserRole.companyAdmin && u.isApproved,
-        );
-        adminName = admin.name;
-      } catch (_) {}
+      // Multi-admin: collect ALL admins for this project
+      final admins = _users.where(
+        (u) => (u.companyId == p.id || u.projectIds.contains(p.id) ||
+                p.adminIds.contains(u.id)) &&
+                u.role == UserRole.companyAdmin && u.isApproved,
+      ).toList();
+      final adminName = admins.isNotEmpty
+          ? admins.map((a) => a.name).join(', ')
+          : 'No admin assigned';
       map[p.id] = {
         'project': p,
         'adminName': adminName,
@@ -326,7 +346,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   int usersForProject(String projectId) =>
-      _users.where((u) => u.companyId == projectId && u.isApproved).length;
+      _users.where((u) =>
+          (u.companyId == projectId || u.projectIds.contains(projectId)) &&
+          u.isApproved).length;
 
   int leadsForProject(String projectId) =>
       _leads.where((l) => l.projectId == projectId).length;
@@ -385,6 +407,7 @@ RLA CRM Platform
         role: user.role, isActive: user.isActive, isApproved: user.isApproved,
         hasLoggedInBefore: user.hasLoggedInBefore,
         createdAt: user.createdAt, companyId: user.companyId, companyName: user.companyName,
+        projectIds: user.projectIds,
       );
       _saveUser(updated);
       _otpStore.remove(email.toLowerCase());
@@ -946,6 +969,7 @@ RLA CRM Platform
       createdAt: _currentUser!.createdAt,
       companyId: _currentUser!.companyId,
       companyName: _currentUser!.companyName,
+      projectIds: _currentUser!.projectIds,
     );
     _saveUser(updated);
     _currentUser = updated;
@@ -1071,6 +1095,7 @@ RLA CRM Platform
         companyName: entityName,
         isApproved: true,
         hasLoggedInBefore: false,
+        projectIds: req.companyId != null ? [req.companyId!] : [],
       );
       _saveUser(user);
       _saveApproval(req);
@@ -1093,6 +1118,7 @@ RLA CRM Platform
               priceTo: proj.priceTo,
               status: proj.status,
               assignedSalesIds: [...proj.assignedSalesIds, user.id],
+              adminIds: proj.adminIds,
               createdById: proj.createdById,
               createdByName: proj.createdByName,
               createdAt: proj.createdAt,
@@ -1163,61 +1189,83 @@ RLA CRM Platform
   }
 
   // ─── Add Project Admin (Master Admin can create companyAdmin for any project) ─
+  // Supports multi-project: pass a list of projectIds to assign the admin to multiple projects at once.
   String? addProjectAdmin({
     required String name,
     required String email,
     required String password,
     String? companyId,    // legacy param — maps to projectId
-    String? projectId,    // preferred param
+    String? projectId,    // single project (preferred)
+    List<String>? projectIds,  // multi-project assignment
   }) {
     if (!isMasterAdmin) return 'Unauthorized';
     if (_users.any((u) => u.email.toLowerCase() == email.toLowerCase())) {
       return 'Email already registered';
     }
-    final resolvedProjectId = projectId ?? companyId;
-    if (resolvedProjectId == null || resolvedProjectId.isEmpty) {
-      return 'Project not selected';
+    // Build the resolved list of project IDs
+    final resolvedIds = <String>{};
+    if (projectIds != null) resolvedIds.addAll(projectIds);
+    if (projectId != null && projectId.isNotEmpty) resolvedIds.add(projectId);
+    if (companyId != null && companyId.isNotEmpty) resolvedIds.add(companyId);
+
+    if (resolvedIds.isEmpty) return 'Project not selected';
+
+    // Validate all projects exist
+    final projects = <RealEstateProject>[];
+    for (final pid in resolvedIds) {
+      try {
+        projects.add(_projects.firstWhere((p) => p.id == pid));
+      } catch (_) {
+        return 'Project not found: $pid';
+      }
     }
-    RealEstateProject? project;
-    try {
-      project = _projects.firstWhere((p) => p.id == resolvedProjectId);
-    } catch (_) {
-      return 'Project not found';
-    }
+
+    // Primary project is the first one for backward compat
+    final primaryProject = projects.first;
+    final primaryId = primaryProject.id;
+
     final user = AppUser(
       name: name,
       email: email,
       password: password,
       role: UserRole.companyAdmin,
-      companyId: resolvedProjectId,   // user.companyId == project.id
-      companyName: project.name,
+      companyId: primaryId,   // user.companyId == first project.id (backward compat)
+      companyName: projects.map((p) => p.name).join(', '),
       isApproved: true,
       hasLoggedInBefore: false,
+      projectIds: resolvedIds.toList(),
     );
     _saveUser(user);
-    // CRITICAL: Update the project's companyId so companyProjects getter finds it
-    if (project.companyId != resolvedProjectId) {
+
+    // Update each project: set companyId if needed and add to adminIds
+    for (final proj in projects) {
+      final newAdminIds = proj.adminIds.contains(user.id)
+          ? proj.adminIds
+          : [...proj.adminIds, user.id];
+      final needsCompanyId = proj.companyId != proj.id && proj.companyId == 'rla_platform';
       final updatedProject = RealEstateProject(
-        id: project.id,
-        name: project.name,
-        location: project.location,
-        description: project.description,
-        developerName: project.developerName,
-        propertyType: project.propertyType,
-        priceFrom: project.priceFrom,
-        priceTo: project.priceTo,
-        status: project.status,
-        assignedSalesIds: project.assignedSalesIds,
-        createdById: project.createdById,
-        createdByName: project.createdByName,
-        createdAt: project.createdAt,
+        id: proj.id,
+        name: proj.name,
+        location: proj.location,
+        description: proj.description,
+        developerName: proj.developerName,
+        propertyType: proj.propertyType,
+        priceFrom: proj.priceFrom,
+        priceTo: proj.priceTo,
+        status: proj.status,
+        assignedSalesIds: proj.assignedSalesIds,
+        adminIds: newAdminIds,
+        createdById: proj.createdById,
+        createdByName: proj.createdByName,
+        createdAt: proj.createdAt,
         updatedAt: DateTime.now(),
-        totalUnits: project.totalUnits,
-        reraNumber: project.reraNumber,
-        companyId: resolvedProjectId,
+        totalUnits: proj.totalUnits,
+        reraNumber: proj.reraNumber,
+        companyId: needsCompanyId ? proj.id : proj.companyId,
       );
       _saveProject(updatedProject);
     }
+
     _loadAll();
     notifyListeners();
     _sendEmail(
@@ -1227,7 +1275,7 @@ RLA CRM Platform
       body: '''
 Hello $name,
 
-You have been added as a Project Admin for "${project.name}" on RLA CRM by ${_currentUser?.name ?? 'Master Admin'}.
+You have been added as a Project Admin for "${projects.map((p) => p.name).join(', ')}" on RLA CRM by ${_currentUser?.name ?? 'Master Admin'}.
 
 Login credentials:
 Email: $email
@@ -1240,6 +1288,126 @@ RLA CRM Platform
       ''',
       triggerEvent: 'project_admin_created',
     );
+    return null;
+  }
+
+  /// Assign an EXISTING project admin user to an additional project.
+  /// This is the key method for multi-project admin support.
+  String? assignAdminToProject({required String userId, required String projectId}) {
+    if (!isMasterAdmin) return 'Unauthorized';
+    AppUser adminUser;
+    try {
+      adminUser = _users.firstWhere((u) => u.id == userId);
+    } catch (_) {
+      return 'User not found';
+    }
+    if (adminUser.role != UserRole.companyAdmin) return 'User is not a project admin';
+
+    RealEstateProject project;
+    try {
+      project = _projects.firstWhere((p) => p.id == projectId);
+    } catch (_) {
+      return 'Project not found';
+    }
+
+    // Add projectId to user's projectIds
+    if (!adminUser.projectIds.contains(projectId)) {
+      final newPids = [...adminUser.projectIds, projectId];
+      // Rebuild companyName with all project names
+      final allProjects = _projects.where((p) => newPids.contains(p.id)).toList();
+      final updatedUser = AppUser(
+        id: adminUser.id, name: adminUser.name, email: adminUser.email,
+        password: adminUser.password, role: adminUser.role,
+        isActive: adminUser.isActive, isApproved: adminUser.isApproved,
+        hasLoggedInBefore: adminUser.hasLoggedInBefore,
+        createdAt: adminUser.createdAt,
+        companyId: adminUser.companyId, // keep primary
+        companyName: allProjects.map((p) => p.name).join(', '),
+        projectIds: newPids,
+      );
+      _saveUser(updatedUser);
+    }
+
+    // Add admin to project's adminIds
+    if (!project.adminIds.contains(userId)) {
+      final needsCompanyId = project.companyId == 'rla_platform';
+      final updatedProject = RealEstateProject(
+        id: project.id,
+        name: project.name,
+        location: project.location,
+        description: project.description,
+        developerName: project.developerName,
+        propertyType: project.propertyType,
+        priceFrom: project.priceFrom,
+        priceTo: project.priceTo,
+        status: project.status,
+        assignedSalesIds: project.assignedSalesIds,
+        adminIds: [...project.adminIds, userId],
+        createdById: project.createdById,
+        createdByName: project.createdByName,
+        createdAt: project.createdAt,
+        updatedAt: DateTime.now(),
+        totalUnits: project.totalUnits,
+        reraNumber: project.reraNumber,
+        companyId: needsCompanyId ? project.id : project.companyId,
+      );
+      _saveProject(updatedProject);
+    }
+
+    _loadAll();
+    notifyListeners();
+    return null;
+  }
+
+  /// Assign a sales user to additional projects (multi-project sales assignment).
+  String? assignSalesToProjects({required String userId, required List<String> projectIds}) {
+    AppUser salesUser;
+    try {
+      salesUser = _users.firstWhere((u) => u.id == userId);
+    } catch (_) {
+      return 'User not found';
+    }
+    if (salesUser.role != UserRole.sales) return 'User is not a sales member';
+
+    // Build updated projectIds for user
+    final newPids = {...salesUser.projectIds, ...projectIds}.toList();
+    final allProjects = _projects.where((p) => newPids.contains(p.id)).toList();
+    final updatedUser = AppUser(
+      id: salesUser.id, name: salesUser.name, email: salesUser.email,
+      password: salesUser.password, role: salesUser.role,
+      isActive: salesUser.isActive, isApproved: salesUser.isApproved,
+      hasLoggedInBefore: salesUser.hasLoggedInBefore,
+      createdAt: salesUser.createdAt,
+      companyId: salesUser.companyId,
+      companyName: allProjects.map((p) => p.name).join(', '),
+      projectIds: newPids,
+    );
+    _saveUser(updatedUser);
+
+    // Add user to each project's assignedSalesIds
+    for (final pid in projectIds) {
+      try {
+        final proj = _projects.firstWhere((p) => p.id == pid);
+        if (!proj.assignedSalesIds.contains(userId)) {
+          final updatedProj = RealEstateProject(
+            id: proj.id, name: proj.name, location: proj.location,
+            description: proj.description, developerName: proj.developerName,
+            propertyType: proj.propertyType, priceFrom: proj.priceFrom,
+            priceTo: proj.priceTo, status: proj.status,
+            assignedSalesIds: [...proj.assignedSalesIds, userId],
+            adminIds: proj.adminIds,
+            createdById: proj.createdById, createdByName: proj.createdByName,
+            createdAt: proj.createdAt, updatedAt: DateTime.now(),
+            totalUnits: proj.totalUnits, reraNumber: proj.reraNumber,
+            companyId: proj.companyId,
+          );
+          _saveProject(updatedProj);
+        }
+      } catch (_) {}
+    }
+
+    _loadAll();
+    notifyListeners();
     return null;
   }
 
@@ -1316,11 +1484,21 @@ RLA CRM Platform
 
   /// Add a user and also assign them to the given project's assignedSalesIds list.
   void addUserAndAssignToProject(AppUser u, String? projectId) {
-    _saveUser(u);
+    // Build projectIds including the assigned project
+    final pids = u.projectIds.toList();
+    if (projectId != null && !pids.contains(projectId)) pids.add(projectId);
+    final userWithProjects = AppUser(
+      id: u.id, name: u.name, email: u.email, password: u.password,
+      role: u.role, isActive: u.isActive, isApproved: u.isApproved,
+      hasLoggedInBefore: u.hasLoggedInBefore, createdAt: u.createdAt,
+      companyId: u.companyId ?? projectId, companyName: u.companyName,
+      projectIds: pids,
+    );
+    _saveUser(userWithProjects);
     if (projectId != null && u.role == UserRole.sales) {
       try {
         final project = _projects.firstWhere((p) => p.id == projectId);
-        if (!project.assignedSalesIds.contains(u.id)) {
+        if (!project.assignedSalesIds.contains(userWithProjects.id)) {
           final updatedProject = RealEstateProject(
             id: project.id,
             name: project.name,
@@ -1331,7 +1509,8 @@ RLA CRM Platform
             priceFrom: project.priceFrom,
             priceTo: project.priceTo,
             status: project.status,
-            assignedSalesIds: [...project.assignedSalesIds, u.id],
+            assignedSalesIds: [...project.assignedSalesIds, userWithProjects.id],
+            adminIds: project.adminIds,
             createdById: project.createdById,
             createdByName: project.createdByName,
             createdAt: project.createdAt,
@@ -1356,6 +1535,7 @@ RLA CRM Platform
         role: u.role, isActive: !u.isActive, isApproved: u.isApproved,
         hasLoggedInBefore: u.hasLoggedInBefore,
         createdAt: u.createdAt, companyId: u.companyId, companyName: u.companyName,
+        projectIds: u.projectIds,
       );
       _saveUser(updated);
       _loadAll();

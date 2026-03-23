@@ -134,13 +134,13 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) {
           // Sales users for this project:
-          // - Project admin: use companyUsers who are sales & approved
-          // - Master admin editing existing project: users whose companyId == project.id
-          // - Master admin creating new project: no sales to assign yet (done after admin is assigned)
+          // - Project admin: all approved sales in their company projects
+          // - Master admin: all sales users associated with this project or its company
           final List<AppUser> salesForSheet = state.isMasterAdmin
               ? (existing != null
                   ? state.users.where((u) =>
-                      (u.companyId == existing.id || u.companyId == existing.companyId) &&
+                      (u.companyId == existing.id || u.companyId == existing.companyId ||
+                       u.projectIds.contains(existing.id)) &&
                       u.role == UserRole.sales &&
                       u.isApproved).toList()
                   : [])
@@ -292,6 +292,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                   totalUnits: int.tryParse(unitsCtrl.text) ?? 0,
                                   priceFrom: double.tryParse(priceFromCtrl.text), priceTo: double.tryParse(priceToCtrl.text),
                                   propertyType: propType, assignedSalesIds: assignedIds,
+                                  adminIds: [],
                                   createdById: state.currentUser!.id, createdByName: state.currentUser!.name,
                                   companyId: companyId,
                                 ));
@@ -366,6 +367,12 @@ class _ProjectCard extends StatelessWidget {
     final assignedNames = project.assignedSalesIds.map((id) {
       try { return state.users.firstWhere((u) => u.id == id).name.split(' ').first; } catch (_) { return ''; }
     }).where((n) => n.isNotEmpty).toList();
+    // Multi-admin names
+    final adminNames = state.users.where((u) =>
+        (u.companyId == project.id || u.projectIds.contains(project.id) ||
+         project.adminIds.contains(u.id)) &&
+        u.role == UserRole.companyAdmin && u.isApproved
+    ).map((a) => a.name.split(' ').first).toList();
 
     return GlassCard(
       padding: EdgeInsets.zero,
@@ -445,6 +452,14 @@ class _ProjectCard extends StatelessWidget {
                       const SizedBox(width: 5),
                       Expanded(child: Text(project.reraNumber!, style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted), maxLines: 1, overflow: TextOverflow.ellipsis)),
                     ],
+                  ]),
+                ],
+                if (adminNames.isNotEmpty && state.isMasterAdmin) ...[
+                  const SizedBox(height: 4),
+                  Row(children: [
+                    const Icon(Icons.admin_panel_settings_outlined, size: 13, color: AppColors.textMuted),
+                    const SizedBox(width: 5),
+                    Expanded(child: Text('Admin: ${adminNames.join(', ')}', style: GoogleFonts.inter(fontSize: 11, color: AppColors.lavender), maxLines: 1, overflow: TextOverflow.ellipsis)),
                   ]),
                 ],
                 if (assignedNames.isNotEmpty) ...[

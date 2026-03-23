@@ -292,8 +292,12 @@ class AppUser {
   bool isApproved;       // NEW: requires admin approval for employees
   bool hasLoggedInBefore; // NEW: for first-login trial popup
   final DateTime createdAt;
-  final String? companyId;
-  String? companyName;
+  final String? companyId;   // Primary project ID (for backward compat; = first projectId)
+  String? companyName;       // Primary project name
+  // Multi-project support: a user (project admin or sales) can belong to multiple projects.
+  // For project admins: all projects they manage.
+  // For sales users: all projects they are assigned to.
+  List<String> projectIds;   // All assigned project IDs (includes companyId as well)
 
   AppUser({
     String? id,
@@ -307,8 +311,19 @@ class AppUser {
     DateTime? createdAt,
     this.companyId,
     this.companyName,
+    List<String>? projectIds,
   })  : id = id ?? _uuid.v4(),
-        createdAt = createdAt ?? DateTime.now();
+        createdAt = createdAt ?? DateTime.now(),
+        // Ensure projectIds always contains the companyId if set
+        projectIds = _buildProjectIds(projectIds, companyId);
+
+  /// Helper: merge explicit projectIds list with the companyId (backward compat)
+  static List<String> _buildProjectIds(List<String>? ids, String? companyId) {
+    final set = <String>{};
+    if (ids != null) set.addAll(ids);
+    if (companyId != null && companyId.isNotEmpty) set.add(companyId);
+    return set.toList();
+  }
 
   Map<String, dynamic> toMap() => {
         'id': id,
@@ -322,21 +337,27 @@ class AppUser {
         'createdAt': createdAt.toIso8601String(),
         'companyId': companyId,
         'companyName': companyName,
+        'projectIds': projectIds,
       };
 
-  factory AppUser.fromMap(Map<String, dynamic> map) => AppUser(
-        id: map['id'],
-        name: map['name'],
-        email: map['email'],
-        password: map['password'],
-        role: UserRole.values[map['role'] ?? 1],
-        isActive: map['isActive'] ?? true,
-        isApproved: map['isApproved'] ?? true, // legacy defaults to approved
-        hasLoggedInBefore: map['hasLoggedInBefore'] ?? true, // legacy already logged in
-        createdAt: DateTime.parse(map['createdAt']),
-        companyId: map['companyId'],
-        companyName: map['companyName'],
-      );
+  factory AppUser.fromMap(Map<String, dynamic> map) {
+    final cid = map['companyId'] as String?;
+    final storedIds = (map['projectIds'] as List?)?.map((e) => e.toString()).toList();
+    return AppUser(
+      id: map['id'],
+      name: map['name'],
+      email: map['email'],
+      password: map['password'],
+      role: UserRole.values[map['role'] ?? 1],
+      isActive: map['isActive'] ?? true,
+      isApproved: map['isApproved'] ?? true, // legacy defaults to approved
+      hasLoggedInBefore: map['hasLoggedInBefore'] ?? true, // legacy already logged in
+      createdAt: DateTime.parse(map['createdAt']),
+      companyId: cid,
+      companyName: map['companyName'],
+      projectIds: storedIds,
+    );
+  }
 
   String get initials {
     final parts = name.trim().split(' ');
@@ -366,6 +387,10 @@ class RealEstateProject {
   double? priceTo;
   ProjectStatus status;
   List<String> assignedSalesIds;
+  // Multi-admin support: a project can have multiple project admins.
+  // adminIds holds all admin user IDs assigned to this project.
+  // companyId remains for backward compat (== first admin's user ID or projectId).
+  List<String> adminIds;
   final String createdById;
   final String createdByName;
   final DateTime createdAt;
@@ -385,6 +410,7 @@ class RealEstateProject {
     this.priceTo,
     this.status = ProjectStatus.active,
     List<String>? assignedSalesIds,
+    List<String>? adminIds,
     required this.createdById,
     required this.createdByName,
     DateTime? createdAt,
@@ -394,6 +420,7 @@ class RealEstateProject {
     required this.companyId,
   })  : id = id ?? _uuid.v4(),
         assignedSalesIds = assignedSalesIds ?? [],
+        adminIds = adminIds ?? [],
         createdAt = createdAt ?? DateTime.now(),
         updatedAt = updatedAt ?? DateTime.now();
 
@@ -417,6 +444,7 @@ class RealEstateProject {
         'priceFrom': priceFrom, 'priceTo': priceTo,
         'status': status.index,
         'assignedSalesIds': assignedSalesIds,
+        'adminIds': adminIds,
         'createdById': createdById, 'createdByName': createdByName,
         'createdAt': createdAt.toIso8601String(),
         'updatedAt': updatedAt.toIso8601String(),
@@ -434,6 +462,7 @@ class RealEstateProject {
         priceTo: map['priceTo']?.toDouble(),
         status: ProjectStatus.values[map['status'] ?? 0],
         assignedSalesIds: List<String>.from(map['assignedSalesIds'] ?? []),
+        adminIds: List<String>.from(map['adminIds'] ?? []),
         createdById: map['createdById'] ?? '',
         createdByName: map['createdByName'] ?? '',
         createdAt: DateTime.parse(map['createdAt']),

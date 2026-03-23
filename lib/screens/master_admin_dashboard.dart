@@ -1314,7 +1314,9 @@ class _AllUsersScreenState extends State<_AllUsersScreen> {
                                     ),
                                 ]),
                                 Text(u.email, style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted)),
-                                if (u.companyName != null) Text(u.companyName!, style: GoogleFonts.inter(fontSize: 10, color: AppColors.lavender)),
+                                if (u.companyName != null) Text(u.companyName!, style: GoogleFonts.inter(fontSize: 10, color: AppColors.lavender), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                if (u.role != UserRole.masterAdmin && u.projectIds.length > 1)
+                                  Text('${u.projectIds.length} projects', style: GoogleFonts.inter(fontSize: 9, color: AppColors.teal, fontWeight: FontWeight.w600)),
                               ],
                             ),
                           ),
@@ -1617,6 +1619,7 @@ class _EditUserSheetState extends State<_EditUserSheet> {
       isApproved: widget.user.isApproved,
       hasLoggedInBefore: widget.user.hasLoggedInBefore,
       createdAt: widget.user.createdAt,
+      projectIds: widget.user.projectIds,
     );
     widget.state.updateUser(updated);
     if (!mounted) return;
@@ -1694,6 +1697,9 @@ class _EditUserSheetState extends State<_EditUserSheet> {
 }
 
 // ─── Add Project Admin Sheet ──────────────────────────────────────────────────
+// Supports:
+//   1. Create NEW admin and assign to one or more projects.
+//   2. Assign an EXISTING project admin to additional projects.
 class _AddProjectAdminSheet extends StatefulWidget {
   const _AddProjectAdminSheet();
 
@@ -1708,7 +1714,11 @@ class _AddProjectAdminSheetState extends State<_AddProjectAdminSheet> {
   bool _obscure = true;
   bool _loading = false;
   String? _error;
-  String? _selectedProjectId;
+  // Multi-project selection
+  final Set<String> _selectedProjectIds = {};
+  // Tab: 0 = create new admin, 1 = assign existing admin
+  int _mode = 0;
+  String? _existingAdminId;
 
   @override
   void dispose() {
@@ -1717,46 +1727,87 @@ class _AddProjectAdminSheetState extends State<_AddProjectAdminSheet> {
   }
 
   void _save() async {
-    if (_nameCtrl.text.trim().isEmpty || _emailCtrl.text.trim().isEmpty || _passCtrl.text.trim().isEmpty) {
-      setState(() => _error = 'All fields are required');
-      return;
-    }
-    if (_selectedProjectId == null) {
-      setState(() => _error = 'Please select a project');
-      return;
-    }
-    if (_passCtrl.text.length < 6) {
-      setState(() => _error = 'Password must be at least 6 characters');
-      return;
-    }
-    setState(() { _loading = true; _error = null; });
-    await Future.delayed(const Duration(milliseconds: 300));
-    if (!mounted) return;
-    final err = context.read<AppState>().addProjectAdmin(
-      name: _nameCtrl.text.trim(),
-      email: _emailCtrl.text.trim(),
-      password: _passCtrl.text.trim(),
-      projectId: _selectedProjectId!,
-    );
-    if (!mounted) return;
-    if (err != null) {
-      setState(() { _loading = false; _error = err; });
-    } else {
-      Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Project Admin "${_nameCtrl.text.trim()}" added successfully!', style: GoogleFonts.inter()),
-          backgroundColor: const Color(0xFF5B3FBF),
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        ),
+    if (_mode == 0) {
+      // Create new admin
+      if (_nameCtrl.text.trim().isEmpty || _emailCtrl.text.trim().isEmpty || _passCtrl.text.trim().isEmpty) {
+        setState(() => _error = 'All fields are required');
+        return;
+      }
+      if (_selectedProjectIds.isEmpty) {
+        setState(() => _error = 'Please select at least one project');
+        return;
+      }
+      if (_passCtrl.text.length < 6) {
+        setState(() => _error = 'Password must be at least 6 characters');
+        return;
+      }
+      setState(() { _loading = true; _error = null; });
+      await Future.delayed(const Duration(milliseconds: 300));
+      if (!mounted) return;
+      final err = context.read<AppState>().addProjectAdmin(
+        name: _nameCtrl.text.trim(),
+        email: _emailCtrl.text.trim(),
+        password: _passCtrl.text.trim(),
+        projectIds: _selectedProjectIds.toList(),
       );
+      if (!mounted) return;
+      if (err != null) {
+        setState(() { _loading = false; _error = err; });
+      } else {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Project Admin "${_nameCtrl.text.trim()}" added to ${_selectedProjectIds.length} project(s)!', style: GoogleFonts.inter()),
+            backgroundColor: const Color(0xFF5B3FBF),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        );
+      }
+    } else {
+      // Assign existing admin to selected projects
+      if (_existingAdminId == null) {
+        setState(() => _error = 'Please select an existing admin');
+        return;
+      }
+      if (_selectedProjectIds.isEmpty) {
+        setState(() => _error = 'Please select at least one project');
+        return;
+      }
+      setState(() { _loading = true; _error = null; });
+      await Future.delayed(const Duration(milliseconds: 200));
+      if (!mounted) return;
+      final state = context.read<AppState>();
+      String? lastErr;
+      for (final pid in _selectedProjectIds) {
+        lastErr = state.assignAdminToProject(userId: _existingAdminId!, projectId: pid);
+        if (lastErr != null) break;
+      }
+      if (!mounted) return;
+      if (lastErr != null) {
+        setState(() { _loading = false; _error = lastErr; });
+      } else {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Admin assigned to ${_selectedProjectIds.length} additional project(s)!', style: GoogleFonts.inter()),
+            backgroundColor: const Color(0xFF3B8A6E),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        );
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final projects = context.watch<AppState>().projects.toList();
+    final state = context.watch<AppState>();
+    final projects = state.projects.toList();
+    final existingAdmins = state.users
+        .where((u) => u.role == UserRole.companyAdmin && u.isApproved)
+        .toList();
+
     return Container(
       margin: const EdgeInsets.all(16),
       decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(24)),
@@ -1777,95 +1828,173 @@ class _AddProjectAdminSheetState extends State<_AddProjectAdminSheet> {
                 Expanded(child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Add Project Admin', style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                    Text('Assign admin access to an existing project', style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted)),
+                    Text('Project Admin Assignment', style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                    Text('Assign one admin to multiple projects', style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted)),
                   ],
                 )),
                 IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close_rounded, color: AppColors.textMuted)),
               ],
             ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppColors.lavender.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.lavender.withValues(alpha: 0.35)),
-              ),
-              child: Row(children: [
-                const Icon(Icons.info_outline_rounded, size: 16, color: AppColors.lavender),
-                const SizedBox(width: 8),
-                Expanded(child: Text(
-                  'This Project Admin will have full access to manage leads, sales team, and settings for the selected project.',
-                  style: GoogleFonts.inter(fontSize: 11, color: AppColors.lavender),
-                )),
-              ]),
-            ),
-            const SizedBox(height: 16),
-            Text('Select Project *', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
-            const SizedBox(height: 8),
-            Container(
-              decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: _selectedProjectId == null ? AppColors.border : AppColors.lavender,
-                    width: _selectedProjectId == null ? 1 : 1.5),
-              ),
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<String>(
-                  value: _selectedProjectId,
-                  hint: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Text('-- Choose project --', style: GoogleFonts.inter(fontSize: 13, color: AppColors.textMuted)),
-                  ),
-                  isExpanded: true,
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  borderRadius: BorderRadius.circular(14),
-                  items: projects.map((p) => DropdownMenuItem(
-                    value: p.id,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 28, height: 28,
-                            decoration: BoxDecoration(gradient: AppColors.gradientPrimary, borderRadius: BorderRadius.circular(7)),
-                            child: Center(child: Text(p.name.isNotEmpty ? p.name[0].toUpperCase() : 'P', style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white))),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(p.name, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w500, color: AppColors.textPrimary), maxLines: 1, overflow: TextOverflow.ellipsis),
-                              Text(p.location, style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted), maxLines: 1, overflow: TextOverflow.ellipsis),
-                            ],
-                          )),
-                        ],
-                      ),
-                    ),
-                  )).toList(),
-                  onChanged: (v) => setState(() => _selectedProjectId = v),
-                ),
-              ),
-            ),
             const SizedBox(height: 14),
-            _field(_nameCtrl, 'Admin Full Name *', Icons.person_outline_rounded),
-            const SizedBox(height: 12),
-            _field(_emailCtrl, 'Email Address *', Icons.mail_outline_rounded, TextInputType.emailAddress),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _passCtrl,
-              obscureText: _obscure,
-              decoration: InputDecoration(
-                labelText: 'Password *',
-                prefixIcon: const Icon(Icons.lock_outline_rounded, size: 18, color: AppColors.textMuted),
-                suffixIcon: GestureDetector(
-                  onTap: () => setState(() => _obscure = !_obscure),
-                  child: Icon(_obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined, size: 18, color: AppColors.textMuted),
+
+            // Mode selector
+            Row(
+              children: [
+                Expanded(child: GestureDetector(
+                  onTap: () => setState(() { _mode = 0; _error = null; }),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    decoration: BoxDecoration(
+                      gradient: _mode == 0 ? AppColors.gradientPrimary : null,
+                      color: _mode == 0 ? null : AppColors.surface,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: _mode == 0 ? Colors.transparent : AppColors.border),
+                    ),
+                    child: Center(child: Text('New Admin', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: _mode == 0 ? Colors.white : AppColors.textPrimary))),
+                  ),
+                )),
+                const SizedBox(width: 10),
+                Expanded(child: GestureDetector(
+                  onTap: () => setState(() { _mode = 1; _error = null; }),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    decoration: BoxDecoration(
+                      gradient: _mode == 1 ? AppColors.gradientTertiary : null,
+                      color: _mode == 1 ? null : AppColors.surface,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: _mode == 1 ? Colors.transparent : AppColors.border),
+                    ),
+                    child: Center(child: Text('Existing Admin', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: _mode == 1 ? Colors.white : AppColors.textPrimary))),
+                  ),
+                )),
+              ],
+            ),
+            const SizedBox(height: 16),
+
+            // New admin fields
+            if (_mode == 0) ...[
+              _field(_nameCtrl, 'Admin Full Name *', Icons.person_outline_rounded),
+              const SizedBox(height: 12),
+              _field(_emailCtrl, 'Email Address *', Icons.mail_outline_rounded, TextInputType.emailAddress),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _passCtrl,
+                obscureText: _obscure,
+                decoration: InputDecoration(
+                  labelText: 'Password *',
+                  prefixIcon: const Icon(Icons.lock_outline_rounded, size: 18, color: AppColors.textMuted),
+                  suffixIcon: GestureDetector(
+                    onTap: () => setState(() => _obscure = !_obscure),
+                    child: Icon(_obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined, size: 18, color: AppColors.textMuted),
+                  ),
                 ),
               ),
-            ),
+              const SizedBox(height: 16),
+            ] else ...[
+              // Existing admin dropdown
+              Text('Select Existing Admin *', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+              const SizedBox(height: 8),
+              if (existingAdmins.isEmpty)
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.border)),
+                  child: Text('No project admins found. Create one first.', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted)),
+                )
+              else
+                Container(
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: _existingAdminId == null ? AppColors.border : AppColors.lavender, width: _existingAdminId == null ? 1 : 1.5),
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      value: _existingAdminId,
+                      hint: Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Text('-- Choose admin --', style: GoogleFonts.inter(fontSize: 13, color: AppColors.textMuted))),
+                      isExpanded: true,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      borderRadius: BorderRadius.circular(14),
+                      items: existingAdmins.map((u) => DropdownMenuItem(
+                        value: u.id,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          child: Row(children: [
+                            AvatarWidget(initials: u.initials, size: 28, gradient: AppColors.gradientPrimary),
+                            const SizedBox(width: 10),
+                            Expanded(child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(u.name, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w500, color: AppColors.textPrimary), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                Text('${u.projectIds.length} project(s)', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
+                              ],
+                            )),
+                          ]),
+                        ),
+                      )).toList(),
+                      onChanged: (v) => setState(() => _existingAdminId = v),
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 16),
+            ],
+
+            // Multi-project selector
+            Text('Select Projects * (${_selectedProjectIds.length} selected)', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+            const SizedBox(height: 8),
+            if (projects.isEmpty)
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.border)),
+                child: Text('No projects available.', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted)),
+              )
+            else
+              ...projects.map((p) {
+                // For existing admin mode, filter out already-assigned projects
+                final isAlreadyAssigned = _mode == 1 && _existingAdminId != null &&
+                    (state.users.firstWhere((u) => u.id == _existingAdminId,
+                        orElse: () => AppUser(name: '', email: '', password: '', role: UserRole.sales))
+                        .projectIds.contains(p.id));
+                final isSel = _selectedProjectIds.contains(p.id);
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: GestureDetector(
+                    onTap: isAlreadyAssigned ? null : () => setState(() {
+                      if (isSel) _selectedProjectIds.remove(p.id);
+                      else _selectedProjectIds.add(p.id);
+                    }),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: isAlreadyAssigned
+                            ? AppColors.border.withValues(alpha: 0.3)
+                            : isSel ? AppColors.lavender.withValues(alpha: 0.1) : AppColors.surface,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: isAlreadyAssigned
+                            ? AppColors.border
+                            : isSel ? AppColors.lavender.withValues(alpha: 0.5) : AppColors.border),
+                      ),
+                      child: Row(children: [
+                        Container(width: 8, height: 8, margin: const EdgeInsets.only(right: 8), decoration: BoxDecoration(shape: BoxShape.circle, color: p.status.color)),
+                        Expanded(child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(p.name, style: GoogleFonts.inter(fontSize: 13, fontWeight: isSel ? FontWeight.w600 : FontWeight.w400, color: isAlreadyAssigned ? AppColors.textMuted : AppColors.textPrimary)),
+                            if (isAlreadyAssigned)
+                              Text('Already assigned', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
+                          ],
+                        )),
+                        if (isSel) const Icon(Icons.check_circle_rounded, color: AppColors.lavender, size: 18),
+                        if (isAlreadyAssigned) const Icon(Icons.lock_outline_rounded, color: AppColors.textMuted, size: 15),
+                      ]),
+                    ),
+                  ),
+                );
+              }),
+
             if (_error != null) ...[
               const SizedBox(height: 10),
               Container(
@@ -1875,7 +2004,13 @@ class _AddProjectAdminSheetState extends State<_AddProjectAdminSheet> {
               ),
             ],
             const SizedBox(height: 20),
-            GradientButton(label: 'Add Project Admin', onTap: _save, isLoading: _loading, icon: Icons.admin_panel_settings_rounded, gradient: AppColors.gradientPrimary),
+            GradientButton(
+              label: _mode == 0 ? 'Add Project Admin' : 'Assign to Projects',
+              onTap: _save,
+              isLoading: _loading,
+              icon: _mode == 0 ? Icons.admin_panel_settings_rounded : Icons.add_link_rounded,
+              gradient: AppColors.gradientPrimary,
+            ),
           ],
         ),
       ),
@@ -2074,17 +2209,19 @@ class _MasterProjectsScreenState extends State<_MasterProjectsScreen> {
 
   Widget _vLine() => Container(width: 1, height: 28, color: AppColors.textPrimary.withValues(alpha: 0.15));
 
-  // Helper: get the project admin name for a given project
+  // Helper: get all project admin names for a given project (multi-admin support)
   String _projectAdminName(AppState state, String projectId) {
-    try {
-      // Match admin whose companyId == projectId (set by addProjectAdmin)
-      final admin = state.users.firstWhere(
-        (u) => (u.companyId == projectId) && u.role == UserRole.companyAdmin && u.isApproved,
-      );
-      return admin.name;
-    } catch (_) {
-      return 'No admin assigned';
-    }
+    // Match admins via adminIds list, companyId, or projectIds
+    final admins = state.users.where(
+      (u) => (u.companyId == projectId ||
+               u.projectIds.contains(projectId) ||
+               state.projects
+                   .where((p) => p.id == projectId)
+                   .any((p) => p.adminIds.contains(u.id))) &&
+             u.role == UserRole.companyAdmin && u.isApproved,
+    ).toList();
+    if (admins.isEmpty) return 'No admin assigned';
+    return admins.map((a) => a.name).join(', ');
   }
 
   void _showProjectSheet(BuildContext context, AppState state, RealEstateProject? existing) {
@@ -2209,6 +2346,7 @@ class _MasterProjectsScreenState extends State<_MasterProjectsScreen> {
                                   developerName: devCtrl.text.trim(),
                                   priceFrom: double.tryParse(priceFromCtrl.text), priceTo: double.tryParse(priceToCtrl.text),
                                   propertyType: propType, assignedSalesIds: [],
+                                  adminIds: [],
                                   createdById: state.currentUser!.id, createdByName: state.currentUser!.name,
                                   companyId: 'rla_platform',
                                 );
