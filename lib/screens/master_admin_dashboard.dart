@@ -22,7 +22,7 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard>
   late AnimationController _fadeCtrl;
   late Animation<double> _fadeAnim;
 
-  static const _tabs = ['Overview', 'Approvals', 'Projects', 'Analytics', 'Users', 'Reports'];
+  static const _tabs = ['Overview', 'Approvals', 'Projects', 'Analytics', 'Users', 'Reports', 'Settings'];
   static const _icons = [
     Icons.dashboard_outlined,
     Icons.pending_actions_outlined,
@@ -30,6 +30,7 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard>
     Icons.analytics_outlined,
     Icons.people_outline_rounded,
     Icons.bar_chart_rounded,
+    Icons.settings_outlined,
   ];
 
   @override
@@ -173,6 +174,7 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard>
       case 3: return const _MasterAnalyticsScreen();
       case 4: return const _AllUsersScreen();
       case 5: return const MasterAdminReportScreen();
+      case 6: return const _MasterSettingsScreen();
       default: return const _MasterOverview();
     }
   }
@@ -2770,6 +2772,332 @@ class _MasterAlertSheetState extends State<_MasterAlertSheet> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ─── Master Admin Settings Screen ────────────────────────────────────────────
+class _MasterSettingsScreen extends StatefulWidget {
+  const _MasterSettingsScreen();
+  @override
+  State<_MasterSettingsScreen> createState() => _MasterSettingsScreenState();
+}
+
+class _MasterSettingsScreenState extends State<_MasterSettingsScreen> {
+  bool _isFlushing = false;
+
+  Future<void> _confirmAndFlush() async {
+    // Step 1: First confirmation dialog
+    final confirmed1 = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            const Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 28),
+            const SizedBox(width: 10),
+            Text('Flush All Data?',
+                style: GoogleFonts.inter(fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+          ],
+        ),
+        content: Text(
+          'This will permanently delete ALL projects, leads, users, approvals, and notifications '
+          'from both this device and the cloud database.\n\n'
+          'Only the master admin account will be preserved.\n\n'
+          'This action cannot be undone.',
+          style: GoogleFonts.inter(fontSize: 14, color: AppColors.textSecondary, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel', style: GoogleFonts.inter(color: AppColors.textMuted)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('Continue', style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed1 != true) return;
+
+    // Step 2: Second confirmation — type "FLUSH" to proceed
+    final controller = TextEditingController();
+    final confirmed2 = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx2, setInner) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Row(
+            children: [
+              const Icon(Icons.delete_forever_rounded, color: Colors.red, size: 28),
+              const SizedBox(width: 10),
+              Text('Final Confirmation',
+                  style: GoogleFonts.inter(fontWeight: FontWeight.bold, color: Colors.red)),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Type FLUSH below to confirm you want to permanently delete all platform data.',
+                style: GoogleFonts.inter(fontSize: 14, color: AppColors.textSecondary, height: 1.5),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                onChanged: (_) => setInner(() {}),
+                style: GoogleFonts.inter(
+                    color: AppColors.textPrimary, fontWeight: FontWeight.bold, letterSpacing: 2),
+                decoration: InputDecoration(
+                  hintText: 'Type FLUSH here',
+                  hintStyle: GoogleFonts.inter(color: AppColors.textMuted),
+                  filled: true,
+                  fillColor: AppColors.background,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: Colors.red),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: Colors.red, width: 2),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx2, false),
+              child: Text('Cancel', style: GoogleFonts.inter(color: AppColors.textMuted)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: controller.text.trim() == 'FLUSH' ? Colors.red : Colors.grey,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              onPressed: controller.text.trim() == 'FLUSH'
+                  ? () => Navigator.pop(ctx2, true)
+                  : null,
+              child: Text('DELETE ALL DATA',
+                  style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      ),
+    );
+    controller.dispose();
+    if (confirmed2 != true) return;
+
+    // Execute the flush
+    setState(() => _isFlushing = true);
+    final err = await context.read<AppState>().flushAllDataExceptMasterAdmin();
+    if (!mounted) return;
+    setState(() => _isFlushing = false);
+
+    if (err != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Flush failed: $err', style: GoogleFonts.inter(color: Colors.white)),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 5),
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.check_circle, color: Colors.white, size: 20),
+              const SizedBox(width: 10),
+              Text('All data flushed. Master admin account preserved.',
+                  style: GoogleFonts.inter(color: Colors.white)),
+            ],
+          ),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 5),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Page header
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  gradient: AppColors.gradientPrimary,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(Icons.settings_outlined, color: Colors.white, size: 22),
+              ),
+              const SizedBox(width: 14),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Settings',
+                      style: GoogleFonts.inter(
+                          fontSize: 22, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+                  Text('Platform administration',
+                      style: GoogleFonts.inter(fontSize: 13, color: AppColors.textMuted)),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 32),
+
+          // Danger Zone card
+          Container(
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: Colors.red.withValues(alpha: 0.4), width: 1.5),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Header
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withValues(alpha: 0.08),
+                    borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.dangerous_rounded, color: Colors.red, size: 22),
+                      const SizedBox(width: 10),
+                      Text('Danger Zone',
+                          style: GoogleFonts.inter(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.red)),
+                    ],
+                  ),
+                ),
+                // Flush action
+                Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Flush All Platform Data',
+                                style: GoogleFonts.inter(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.textPrimary)),
+                            const SizedBox(height: 6),
+                            Text(
+                              'Permanently deletes all projects, leads, users (except master admin), '
+                              'approvals, and notifications from this device and the cloud database. '
+                              'The master admin login credentials are preserved.',
+                              style: GoogleFonts.inter(
+                                  fontSize: 13, color: AppColors.textSecondary, height: 1.5),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      _isFlushing
+                          ? const SizedBox(
+                              width: 40, height: 40,
+                              child: CircularProgressIndicator(color: Colors.red, strokeWidth: 2.5))
+                          : ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.red,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                elevation: 0,
+                              ),
+                              icon: const Icon(Icons.delete_sweep_rounded, size: 18),
+                              label: Text('Flush Data',
+                                  style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+                              onPressed: _confirmAndFlush,
+                            ),
+                    ],
+                  ),
+                ),
+                // Divider + what is preserved
+                Container(
+                  margin: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: AppColors.background,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('What will be deleted:',
+                          style: GoogleFonts.inter(
+                              fontSize: 12, fontWeight: FontWeight.w600, color: Colors.red)),
+                      const SizedBox(height: 8),
+                      for (final item in [
+                        'All project records',
+                        'All lead records',
+                        'All non-master-admin user accounts',
+                        'All approval requests',
+                        'All notifications',
+                        'All email logs (local)',
+                      ])
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 4),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.remove_circle_outline, color: Colors.red, size: 14),
+                              const SizedBox(width: 8),
+                              Text(item,
+                                  style: GoogleFonts.inter(
+                                      fontSize: 12, color: AppColors.textSecondary)),
+                            ],
+                          ),
+                        ),
+                      const Divider(height: 16),
+                      Text('What will be preserved:',
+                          style: GoogleFonts.inter(
+                              fontSize: 12, fontWeight: FontWeight.w600, color: Colors.green)),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          const Icon(Icons.check_circle_outline, color: Colors.green, size: 14),
+                          const SizedBox(width: 8),
+                          Text('Master admin login credentials (email & password)',
+                              style: GoogleFonts.inter(
+                                  fontSize: 12, color: AppColors.textSecondary)),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

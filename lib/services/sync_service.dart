@@ -396,4 +396,53 @@ class SyncService {
     }
     if (kDebugMode) debugPrint('✅ pushAll complete');
   }
+
+  // ── Delete all records in a collection except a specific ID ───────────────
+  /// Fetches every record in [collection] from the cloud and deletes each one
+  /// whose id != [keepId].  Returns the number of records deleted.
+  static Future<int> deleteAllExcept(String collection, {String? keepId}) async {
+    if (!isAvailable) {
+      resetAvailability(); // try once more
+    }
+    try {
+      final records = await fetchAll(collection);
+      int deleted = 0;
+      for (final record in records) {
+        final id = record['id'] as String?;
+        if (id == null) continue;
+        if (keepId != null && id == keepId) continue;
+        final ok = await _attemptDelete(collection, id);
+        if (ok) deleted++;
+      }
+      if (kDebugMode) debugPrint('✅ deleteAllExcept[$collection]: deleted $deleted records');
+      return deleted;
+    } catch (e) {
+      if (kDebugMode) debugPrint('⚠️ deleteAllExcept[$collection]: $e');
+      return 0;
+    }
+  }
+
+  // ── Full platform flush (keeps one user record) ───────────────────────────
+  /// Deletes every record from every collection on the cloud, except the
+  /// master admin user record identified by [masterAdminId].
+  /// Returns a summary map of {collection: countDeleted}.
+  static Future<Map<String, int>> flushCloudExceptMasterAdmin({
+    required String masterAdminId,
+  }) async {
+    resetAvailability();
+    _writeQueue.clear(); // cancel any pending writes so they don't restore data
+    final result = <String, int>{};
+    result[kUsers]         = await deleteAllExcept(kUsers, keepId: masterAdminId);
+    result[kLeads]         = await deleteAllExcept(kLeads);
+    result[kProjects]      = await deleteAllExcept(kProjects);
+    result[kApprovals]     = await deleteAllExcept(kApprovals);
+    result[kNotifications] = await deleteAllExcept(kNotifications);
+    resetVersion(); // force a full re-pull on next poll
+    if (kDebugMode) {
+      debugPrint('🧹 flushCloudExceptMasterAdmin complete: '
+          '${result[kUsers]}u ${result[kLeads]}l ${result[kProjects]}p '
+          '${result[kApprovals]}a ${result[kNotifications]}n deleted');
+    }
+    return result;
+  }
 }

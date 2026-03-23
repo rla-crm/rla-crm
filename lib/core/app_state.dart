@@ -1584,6 +1584,79 @@ RLA CRM Platform
     _loadAll();
     notifyListeners();
   }
+
+  // ─── Flush all platform data except master admin ───────────────────────────
+  /// Wipes every user (except master admin), every project, lead, approval,
+  /// notification, and email log — both from local Hive and from the cloud.
+  /// The master admin record is preserved and re-seeded if needed.
+  /// Returns null on success, or an error string on failure.
+  Future<String?> flushAllDataExceptMasterAdmin() async {
+    if (!isMasterAdmin) return 'Unauthorized';
+    try {
+      // 1. Stop sync timers to prevent re-pulling data during flush
+      _versionTimer?.cancel();
+      _versionTimer = null;
+      _immediateTimer?.cancel();
+      _immediateTimer = null;
+
+      // 2. Capture master admin record BEFORE wiping anything
+      const masterAdminId = 'master_admin_001';
+      AppUser? masterAdmin;
+      try {
+        masterAdmin = _users.firstWhere((u) => u.id == masterAdminId);
+      } catch (_) {}
+      // Fallback: reconstruct from known credentials
+      masterAdmin ??= AppUser(
+        id: masterAdminId,
+        name: 'Aksayal',
+        email: 'aksayal@gmail.com',
+        password: '09101991',
+        role: UserRole.masterAdmin,
+        companyId: null,
+        isApproved: true,
+        hasLoggedInBefore: true,
+      );
+
+      // 3. Flush local Hive boxes
+      await _usersBox.clear();
+      await _leadsBox.clear();
+      await _projectsBox.clear();
+      await _approvalsBox.clear();
+      await _notifBox.clear();
+      await _emailLogsBox.clear();
+
+      // 4. Clear all in-memory tombstone sets so flush is clean
+      _deletedLeadIds.clear();
+      _deletedProjectIds.clear();
+      _deletedUserIds.clear();
+      _deletedNotifIds.clear();
+      _deletedApprovalIds.clear();
+
+      // 5. Re-save master admin locally
+      _usersBox.put(masterAdmin.id, jsonEncode(masterAdmin.toMap()));
+
+      // 6. Reload in-memory state (all lists except master admin user)
+      _loadAll();
+      notifyListeners();
+
+      // 7. Flush the cloud (delete all records except master admin user)
+      await SyncService.flushCloudExceptMasterAdmin(masterAdminId: masterAdminId);
+
+      // 8. Re-push master admin to cloud to ensure it is preserved
+      await SyncService.upsert(SyncService.kUsers, masterAdmin.toMap());
+
+      // 9. Restart sync timers
+      _startPeriodicSync();
+
+      if (kDebugMode) debugPrint('✅ Platform flush complete — master admin preserved');
+      return null; // success
+    } catch (e) {
+      if (kDebugMode) debugPrint('⚠️ flushAllDataExceptMasterAdmin: $e');
+      // Restart sync timers even on error
+      _startPeriodicSync();
+      return 'Flush failed: $e';
+    }
+  }
 }
 
 // ─── OTP Entry ────────────────────────────────────────────────────────────────
