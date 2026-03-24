@@ -460,25 +460,25 @@ RLA CRM Platform
     // ── Pull from cloud — up to 4 attempts with escalating delays ────────
     SyncService.resetAvailability();
     SyncService.resetVersion();
-    await _syncFromCloud();
+    await _forcePullFromCloud();
 
     if (_users.isEmpty) {
       if (kDebugMode) debugPrint('⚠️ No users after sync #1, retrying in 1s...');
       await Future.delayed(const Duration(seconds: 1));
       SyncService.resetAvailability();
-      await _syncFromCloud();
+      await _forcePullFromCloud();
     }
     if (_users.isEmpty) {
       if (kDebugMode) debugPrint('⚠️ No users after sync #2, retrying in 2s...');
       await Future.delayed(const Duration(seconds: 2));
       SyncService.resetAvailability();
-      await _syncFromCloud();
+      await _forcePullFromCloud();
     }
     if (_users.isEmpty) {
       if (kDebugMode) debugPrint('⚠️ No users after sync #3, retrying in 3s...');
       await Future.delayed(const Duration(seconds: 3));
       SyncService.resetAvailability();
-      await _syncFromCloud();
+      await _forcePullFromCloud();
     }
 
     // ── Ensure master admin exists on cloud ───────────────────────────────
@@ -585,6 +585,12 @@ RLA CRM Platform
   // On every pull we REPLACE the in-memory lists and the Hive cache entirely
   // from cloud data. There is no merge, no push-back, no conflict resolution.
   // The cloud version always wins.
+  // ── Force pull — bypasses _syncInProgress guard (used during login/init) ──
+  Future<void> _forcePullFromCloud() async {
+    _syncInProgress = false; // clear any stale lock
+    await _syncFromCloud();
+  }
+
   Future<void> _syncFromCloud() async {
     if (_syncInProgress) return;
     _syncInProgress = true;
@@ -804,10 +810,11 @@ RLA CRM Platform
 
     // ── Force a fresh cloud pull before every login attempt ──────────────
     // Up to 4 attempts with progressive delays to handle slow connections.
+    // Uses _forcePullFromCloud() to bypass any stale _syncInProgress lock.
     for (int attempt = 1; attempt <= 4; attempt++) {
       SyncService.resetAvailability();
       SyncService.resetVersion();
-      await _syncFromCloud();
+      await _forcePullFromCloud();
 
       final found = _users.any((u) =>
           u.email.toLowerCase() == email ||
