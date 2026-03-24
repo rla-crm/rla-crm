@@ -19,6 +19,7 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
   final _passCtrl  = TextEditingController();
   bool _obscure    = true;
   bool _loading    = false;
+  String _loadingMsg = 'Signing in...';
   bool _rememberMe = false;
   String? _error;
   late AnimationController _fadeCtrl;
@@ -56,13 +57,19 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
       setState(() { _error = 'Please enter your email and password.'; });
       return;
     }
-    setState(() { _loading = true; _error = null; });
+    setState(() { _loading = true; _error = null; _loadingMsg = 'Connecting to cloud...'; });
     if (!mounted) return;
     final state = context.read<AppState>();
 
-    // Use the async version which performs up to 2 cloud sync attempts before
-    // authenticating. This ensures seamless login across all browsers (Chrome,
-    // Safari, Firefox) and all devices — even on fresh installs.
+    // Show progressive loading messages so users know what's happening
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted && _loading) setState(() => _loadingMsg = 'Verifying credentials...');
+    });
+    Future.delayed(const Duration(seconds: 4), () {
+      if (mounted && _loading) setState(() => _loadingMsg = 'Almost there...');
+    });
+
+    // Always authenticate against live cloud data — no local cache.
     final err = await state.loginWithErrorAsync(email, pass);
 
     if (!mounted) return;
@@ -284,8 +291,8 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
                               style: GoogleFonts.inter(fontSize: 12, color: const Color(0xFFD04060)))),
                         ],
                       ),
-                      // Show retry button if account not found (helps Chrome browser sync issues)
-                      if (_error!.contains('No account found')) ...[
+                      // Show retry button if account not found
+                      if (_error!.contains('Account not found')) ...[
                         const SizedBox(height: 8),
                         GestureDetector(
                           onTap: _loading ? null : _login,
@@ -310,7 +317,7 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
                 ),
               ],
               const SizedBox(height: 20),
-              GradientButton(label: 'Sign In', onTap: _login, isLoading: _loading, icon: Icons.login_rounded),
+              GradientButton(label: _loading ? _loadingMsg : 'Sign In', onTap: _login, isLoading: _loading, icon: Icons.login_rounded),
             ],
           ),
         ),

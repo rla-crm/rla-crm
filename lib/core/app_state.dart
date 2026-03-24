@@ -437,6 +437,8 @@ RLA CRM Platform
 
   Future<void> init() async {
     await Hive.initFlutter();
+
+    // ── Open boxes (v10 = cloud-first era) ───────────────────────────────
     _usersBox      = await Hive.openBox('users_v10');
     _leadsBox      = await Hive.openBox('leads_v10');
     _notifBox      = await Hive.openBox('notifs_v10');
@@ -445,12 +447,19 @@ RLA CRM Platform
     _emailLogsBox  = await Hive.openBox('email_logs_v10');
     _settingsBox   = await Hive.openBox('settings_v10');
 
-    // Seed in-memory from Hive cache so login screen is instant while
-    // the cloud pull happens in parallel.
-    _loadFromCache();
+    // ── ALWAYS clear local cache on startup ───────────────────────────────
+    // Cloud is the single source of truth. We never trust stale local data.
+    // The cache is rebuilt from cloud on every startup.
+    await _usersBox.clear();
+    await _leadsBox.clear();
+    await _notifBox.clear();
+    await _projectsBox.clear();
+    await _approvalsBox.clear();
+    // (keep email logs and settings — they are local-only)
 
-    // ── Pull from cloud — up to 3 attempts ────────────────────────────────
+    // ── Pull from cloud — up to 4 attempts with escalating delays ────────
     SyncService.resetAvailability();
+    SyncService.resetVersion();
     await _syncFromCloud();
 
     if (_users.isEmpty) {
@@ -465,23 +474,24 @@ RLA CRM Platform
       SyncService.resetAvailability();
       await _syncFromCloud();
     }
+    if (_users.isEmpty) {
+      if (kDebugMode) debugPrint('⚠️ No users after sync #3, retrying in 3s...');
+      await Future.delayed(const Duration(seconds: 3));
+      SyncService.resetAvailability();
+      await _syncFromCloud();
+    }
 
-    // ── Ensure master admin exists on cloud (re-seed if ever wiped) ───────
+    // ── Ensure master admin exists on cloud ───────────────────────────────
     final hasMasterAdmin = _users.any((u) => u.role == UserRole.masterAdmin);
     if (!hasMasterAdmin) {
       if (kDebugMode) debugPrint('🔑 Master admin missing — seeding');
       await _seedMasterAdmin();
     } else {
-      // Always re-push to guard against JSONBlob expiry
       await _ensureMasterAdminInCloud();
     }
 
     WidgetsBinding.instance.addObserver(this);
-
-    // After any successful cloud write, schedule a pull 1s later so this
-    // device immediately reflects the confirmed state.
     SyncService.onWriteSuccess = _scheduleImmediateSync;
-
     _startPeriodicSync();
   }
 
@@ -785,62 +795,64 @@ RLA CRM Platform
     }
   }
 
-  // ─── Authentication ───────────────────────────────────────────────────────
-  /// Returns null on success, or an error message string on failure.
-  /// Performs up to 2 cloud sync attempts to ensure users from all browsers/
-  /// platforms (Chrome, Safari, mobile) are always found — even on first login.
+  // ─── Authentication ── CLOUD ONLY ─────────────────────────────────────────
+  // Login ALWAYS authenticates against the live cloud data.
+  // No local cache is ever used for authentication — this ensures every device
+  // (incognito, new browser, different laptop) always sees the same accounts.
   Future<String?> loginWithErrorAsync(String emailOrUsername, String password) async {
-    // ── 3-attempt sync before login ──────────────────────────────────────────
-    // Handles private browsing, Chrome IndexedDB quirks, network delays.
-    for (int attempt = 1; attempt <= 3; attempt++) {
+    final email = emailOrUsername.trim().toLowerCase();
+
+    // ── Force a fresh cloud pull before every login attempt ──────────────
+    // Up to 4 attempts with progressive delays to handle slow connections.
+    for (int attempt = 1; attempt <= 4; attempt++) {
       SyncService.resetAvailability();
+      SyncService.resetVersion();
       await _syncFromCloud();
+
       final found = _users.any((u) =>
-          u.email.toLowerCase() == emailOrUsername.toLowerCase() ||
-          u.name.toLowerCase() == emailOrUsername.toLowerCase());
+          u.email.toLowerCase() == email ||
+          u.name.toLowerCase() == email);
       if (found) break;
-      if (attempt < 3) {
-        if (kDebugMode) debugPrint('⚠️ User not found after sync #$attempt, retrying...');
-        await Future.delayed(Duration(milliseconds: 800 * attempt));
+
+      if (attempt < 4) {
+        if (kDebugMode) debugPrint('⚠️ User not found after cloud sync #$attempt, retrying...');
+        await Future.delayed(Duration(milliseconds: 700 * attempt));
       }
     }
 
-    // Also try matching by name (username) for flexibility
     AppUser? user;
     try {
       user = _users.firstWhere((u) =>
-          u.email.toLowerCase() == emailOrUsername.toLowerCase() ||
-          u.name.toLowerCase() == emailOrUsername.toLowerCase());
+          u.email.toLowerCase() == email ||
+          u.name.toLowerCase() == email);
     } catch (_) {
-      // Still not found after 3 syncs — give clear message
-      return 'Account not found. Please check your email or contact your admin.\n\nTip: Try again in a few seconds if you just created the account.';
+      return 'Account not found. Please check your email or contact your admin.';
     }
 
-    if (user.password != password) return 'Incorrect password. Please try again';
-    if (!user.isApproved) return 'Your account is pending approval. Please contact the admin';
-    if (!user.isActive) return 'Your account has been deactivated. Please contact the admin';
+    if (user.password != password) return 'Incorrect password. Please try again.';
+    if (!user.isApproved) return 'Your account is pending approval. Please contact the admin.';
+    if (!user.isActive)   return 'Your account has been deactivated. Please contact the admin.';
+
     _currentUser = user;
     notifyListeners();
-    // Background sync after login to pull latest data
-    unawaited(_syncFromCloud());
+    unawaited(_syncFromCloud()); // pull remaining data in background
     return null;
   }
 
-  /// Synchronous login (tries local cache first, then falls back gracefully)
+  /// Synchronous login — only used internally; always prefer loginWithErrorAsync.
   String? loginWithError(String emailOrUsername, String password) {
+    final email = emailOrUsername.trim().toLowerCase();
     AppUser? user;
     try {
-      user = _users.firstWhere(
-          (u) => u.email.toLowerCase() == emailOrUsername.toLowerCase());
+      user = _users.firstWhere((u) => u.email.toLowerCase() == email);
     } catch (_) {
-      return 'No account found with this email address';
+      return 'Account not found. Please check your email or contact your admin.';
     }
-    if (user.password != password) return 'Incorrect password. Please try again';
-    if (!user.isApproved) return 'Your account is pending approval. Please contact the admin';
-    if (!user.isActive) return 'Your account has been deactivated. Please contact the admin';
+    if (user.password != password) return 'Incorrect password. Please try again.';
+    if (!user.isApproved) return 'Your account is pending approval. Please contact the admin.';
+    if (!user.isActive)   return 'Your account has been deactivated. Please contact the admin.';
     _currentUser = user;
     notifyListeners();
-    // Trigger background sync after successful login
     _syncFromCloud();
     return null;
   }
@@ -857,12 +869,8 @@ RLA CRM Platform
 
   void logout() {
     _currentUser = null;
-    // Clear tombstones on logout so a fresh session sees all data
-    _deletedLeadIds.clear();
-    _deletedProjectIds.clear();
-    _deletedUserIds.clear();
-    _deletedApprovalIds.clear();
-    _deletedNotifIds.clear();
+    // Force a fresh cloud pull on next login attempt
+    SyncService.resetVersion();
     notifyListeners();
   }
 
