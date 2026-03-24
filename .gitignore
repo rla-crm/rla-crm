@@ -30,3 +30,4 @@ Thumbs.db
 
 # Keep lib/ directory for source code!
 
+.github/workflows/
