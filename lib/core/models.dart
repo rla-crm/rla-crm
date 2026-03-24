@@ -330,7 +330,7 @@ class AppUser {
         'name': name,
         'email': email,
         'password': password,
-        'role': role.index,
+        'role': role.index, // saved as int; _parseRole handles both int and string on read
         'isActive': isActive,
         'isApproved': isApproved,
         'hasLoggedInBefore': hasLoggedInBefore,
@@ -348,7 +348,7 @@ class AppUser {
       name: map['name'],
       email: map['email'],
       password: map['password'],
-      role: UserRole.values[map['role'] ?? 1],
+      role: _parseRole(map['role']),
       isActive: map['isActive'] ?? true,
       isApproved: map['isApproved'] ?? true, // legacy defaults to approved
       hasLoggedInBefore: map['hasLoggedInBefore'] ?? true, // legacy already logged in
@@ -357,6 +357,22 @@ class AppUser {
       companyName: map['companyName'],
       projectIds: storedIds,
     );
+  }
+
+  // Handles both string names ("masterAdmin") and integer indexes (0)
+  // Cloud seeds role as string; app writes role as int — must tolerate both.
+  static UserRole _parseRole(dynamic raw) {
+    if (raw == null) return UserRole.sales;
+    if (raw is int) return UserRole.values[raw.clamp(0, UserRole.values.length - 1)];
+    switch (raw.toString()) {
+      case 'masterAdmin':  return UserRole.masterAdmin;
+      case 'companyAdmin': return UserRole.companyAdmin;
+      case 'sales':        return UserRole.sales;
+      case '0':            return UserRole.masterAdmin;
+      case '1':            return UserRole.companyAdmin;
+      case '2':            return UserRole.sales;
+      default:             return UserRole.sales;
+    }
   }
 
   String get initials {
