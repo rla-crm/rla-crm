@@ -564,12 +564,16 @@ RLA CRM Platform
     _immediateTimer = null;
   }
 
-  /// Schedule a cloud pull 1s from now — called after every successful write.
+  /// Schedule a cloud pull 3s after a confirmed write.
+  /// 3s gives the cloud storage enough time to persist before we re-pull.
+  /// Does NOT reset version — lets the normal version poll detect the change
+  /// so the periodic timer doesn't race against this timer.
   void _scheduleImmediateSync() {
     _immediateTimer?.cancel();
-    _immediateTimer = Timer(const Duration(seconds: 1), () async {
-      SyncService.resetVersion();
-      await _syncFromCloud();
+    _immediateTimer = Timer(const Duration(seconds: 3), () async {
+      // Don't reset version here — the upsert already updated _lastKnownVersion.
+      // Just force a fresh pull to confirm cloud state matches local state.
+      await _forcePullFromCloud();
     });
   }
 
@@ -730,22 +734,29 @@ RLA CRM Platform
   // Hive cache is updated by _replaceCache() which runs on every cloud pull.
 
   void _saveUser(AppUser u) {
-    // Optimistic update
+    // Optimistic update — add to memory immediately
     _users = [ ..._users.where((x) => x.id != u.id), u ];
-    SyncService.upsert(SyncService.kUsers, u.toMap()).then((ok) {
-      if (!ok && kDebugMode) debugPrint('⚠️ _saveUser cloud failed: ${u.id} — queued');
-    });
-    _scheduleImmediateSync();
     notifyListeners();
+    // Schedule re-pull ONLY after cloud confirms the write
+    SyncService.upsert(SyncService.kUsers, u.toMap()).then((ok) {
+      if (ok) {
+        _scheduleImmediateSync();
+      } else {
+        if (kDebugMode) debugPrint('⚠️ _saveUser cloud failed: ${u.id} — queued for retry');
+      }
+    });
   }
 
   void _saveLead(Lead l) {
     _leads = [ ..._leads.where((x) => x.id != l.id), l ];
-    SyncService.upsert(SyncService.kLeads, l.toMap()).then((ok) {
-      if (!ok && kDebugMode) debugPrint('⚠️ _saveLead cloud failed: ${l.id} — queued');
-    });
-    _scheduleImmediateSync();
     notifyListeners();
+    SyncService.upsert(SyncService.kLeads, l.toMap()).then((ok) {
+      if (ok) {
+        _scheduleImmediateSync();
+      } else {
+        if (kDebugMode) debugPrint('⚠️ _saveLead cloud failed: ${l.id} — queued for retry');
+      }
+    });
   }
 
   void _saveNotification(CrmNotification n) {
@@ -759,20 +770,26 @@ RLA CRM Platform
 
   void _saveProject(RealEstateProject p) {
     _projects = [ ..._projects.where((x) => x.id != p.id), p ];
-    SyncService.upsert(SyncService.kProjects, p.toMap()).then((ok) {
-      if (!ok && kDebugMode) debugPrint('⚠️ _saveProject cloud failed: ${p.id} — queued');
-    });
-    _scheduleImmediateSync();
     notifyListeners();
+    SyncService.upsert(SyncService.kProjects, p.toMap()).then((ok) {
+      if (ok) {
+        _scheduleImmediateSync();
+      } else {
+        if (kDebugMode) debugPrint('⚠️ _saveProject cloud failed: ${p.id} — queued for retry');
+      }
+    });
   }
 
   void _saveApproval(ApprovalRequest a) {
     _approvals = [ ..._approvals.where((x) => x.id != a.id), a ];
-    SyncService.upsert(SyncService.kApprovals, a.toMap()).then((ok) {
-      if (!ok && kDebugMode) debugPrint('⚠️ _saveApproval cloud failed: ${a.id} — queued');
-    });
-    _scheduleImmediateSync();
     notifyListeners();
+    SyncService.upsert(SyncService.kApprovals, a.toMap()).then((ok) {
+      if (ok) {
+        _scheduleImmediateSync();
+      } else {
+        if (kDebugMode) debugPrint('⚠️ _saveApproval cloud failed: ${a.id} — queued for retry');
+      }
+    });
   }
 
   void _saveEmailLog(EmailLog e) {
