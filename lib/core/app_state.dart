@@ -16,6 +16,10 @@ class SignupResult {
 }
 
 class AppState extends ChangeNotifier with WidgetsBindingObserver {
+  // ─── Hive boxes (session cache ONLY — cloud is the source of truth) ────────
+  // Hive is written after every cloud pull so a page-refresh shows data
+  // immediately while the first cloud pull is in flight (~300ms).
+  // Hive data is NEVER pushed back to the cloud.
   late Box _usersBox;
   late Box _leadsBox;
   late Box _notifBox;
@@ -33,27 +37,21 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   List<EmailLog> _emailLogs = [];
 
   // ─── Real-time sync infrastructure ────────────────────────────────────────
-  // Two-timer approach for near-real-time cross-device sync:
+  // CLOUD IS THE SINGLE SOURCE OF TRUTH.
   //
-  //  _versionTimer  (every 5s, lightweight)
-  //    → polls GET /api/sync/version (a single integer)
-  //    → only triggers a full pullAll when version has changed
-  //    → makes "is there anything new?" essentially free
+  //  _versionTimer  (every 3s, lightweight)
+  //    → polls GET /api/sync/version
+  //    → triggers a full pullAll only when version changed
   //
-  //  _immediateTimer (one-shot, fires 2s after any local write)
-  //    → triggers a full pullAll shortly after a write so THIS device
-  //      immediately reflects the saved state (confirms cloud write)
-  //
-  // Together these ensure:
-  //   - Any write by Admin is visible to Sales within ≤5 seconds
-  //   - Any local save is confirmed from cloud within 2 seconds
-  //   - No unnecessary full pulls when nothing has changed
+  //  _immediateTimer (one-shot, fires 1s after any write)
+  //    → forces a full re-pull to confirm the cloud write landed
   Timer? _versionTimer;
   Timer? _immediateTimer;
-  static const Duration _versionPollInterval = Duration(seconds: 5);
+  static const Duration _versionPollInterval = Duration(seconds: 3);
   bool _syncInProgress = false;
 
-  // ─── Tombstone sets: IDs deleted locally that must NOT be re-pulled from cloud ─
+  // NOTE: Tombstone sets are kept ONLY for the flush operation —
+  // they are NOT used during normal sync (cloud data replaces local wholesale).
   final Set<String> _deletedLeadIds      = {};
   final Set<String> _deletedProjectIds   = {};
   final Set<String> _deletedUserIds      = {};
@@ -411,7 +409,7 @@ RLA CRM Platform
       );
       _saveUser(updated);
       _otpStore.remove(email.toLowerCase());
-      _loadAll();
+      
       notifyListeners();
       return null;
     } catch (_) {
@@ -439,19 +437,19 @@ RLA CRM Platform
 
   Future<void> init() async {
     await Hive.initFlutter();
-    // Use try/catch per box to handle Chrome IndexedDB quirks gracefully
-    _usersBox      = await Hive.openBox('users_v9');
-    _leadsBox      = await Hive.openBox('leads_v9');
-    _notifBox      = await Hive.openBox('notifs_v9');
-    _projectsBox   = await Hive.openBox('projects_v9');
-    _approvalsBox  = await Hive.openBox('approvals_v9');
-    _emailLogsBox  = await Hive.openBox('email_logs_v9');
-    _settingsBox   = await Hive.openBox('settings_v9');
+    _usersBox      = await Hive.openBox('users_v10');
+    _leadsBox      = await Hive.openBox('leads_v10');
+    _notifBox      = await Hive.openBox('notifs_v10');
+    _projectsBox   = await Hive.openBox('projects_v10');
+    _approvalsBox  = await Hive.openBox('approvals_v10');
+    _emailLogsBox  = await Hive.openBox('email_logs_v10');
+    _settingsBox   = await Hive.openBox('settings_v10');
 
-    _loadAll();
+    // Seed in-memory from Hive cache so login screen is instant while
+    // the cloud pull happens in parallel.
+    _loadFromCache();
 
-    // ── Cloud sync on startup: 3 attempts with escalating delays ─────────────
-    // Guarantees users from ALL platforms/browsers are loaded before login.
+    // ── Pull from cloud — up to 3 attempts ────────────────────────────────
     SyncService.resetAvailability();
     await _syncFromCloud();
 
@@ -461,7 +459,6 @@ RLA CRM Platform
       SyncService.resetAvailability();
       await _syncFromCloud();
     }
-
     if (_users.isEmpty) {
       if (kDebugMode) debugPrint('⚠️ No users after sync #2, retrying in 2s...');
       await Future.delayed(const Duration(seconds: 2));
@@ -469,35 +466,32 @@ RLA CRM Platform
       await _syncFromCloud();
     }
 
-    // ── Always ensure master admin exists locally + push to cloud ─────────────
-    // This runs on EVERY startup — if master admin was wiped from cloud
-    // (e.g. JSONBlob expiry), it gets re-seeded immediately.
+    // ── Ensure master admin exists on cloud (re-seed if ever wiped) ───────
     final hasMasterAdmin = _users.any((u) => u.role == UserRole.masterAdmin);
     if (!hasMasterAdmin) {
-      if (kDebugMode) debugPrint('🔑 Master admin missing — re-seeding locally and pushing to cloud');
-      _seedData();
+      if (kDebugMode) debugPrint('🔑 Master admin missing — seeding');
+      await _seedMasterAdmin();
+    } else {
+      // Always re-push to guard against JSONBlob expiry
+      await _ensureMasterAdminInCloud();
     }
-    // Always push master admin to cloud (server-side worker also guards this,
-    // but belt-and-suspenders: the client pushes it too on every cold start)
-    await _ensureMasterAdminInCloud();
 
-    // Register lifecycle observer (sync on app resume)
     WidgetsBinding.instance.addObserver(this);
 
-    // ── Wire up post-write immediate sync ─────────────────────────────────────
-    // Whenever SyncService successfully writes to the cloud, schedule a
-    // re-pull 2s later so this device immediately sees the confirmed state.
+    // After any successful cloud write, schedule a pull 1s later so this
+    // device immediately reflects the confirmed state.
     SyncService.onWriteSuccess = _scheduleImmediateSync;
 
-    // Start real-time version polling (every 5s, lightweight)
     _startPeriodicSync();
   }
 
-  /// Push master admin record to cloud — called on every startup.
-  /// Safe to call repeatedly: it is a no-op if already in cloud.
   Future<void> _ensureMasterAdminInCloud() async {
     try {
-      final masterAdmin = AppUser(
+      // Preserve the existing master admin record if we have it
+      // (so hasLoggedInBefore is not reset on every startup)
+      AppUser? existing;
+      try { existing = _users.firstWhere((u) => u.id == 'master_admin_001'); } catch (_) {}
+      final masterAdmin = existing ?? AppUser(
         id: 'master_admin_001',
         name: 'Aksayal',
         email: 'aksayal@gmail.com',
@@ -510,32 +504,46 @@ RLA CRM Platform
       await SyncService.upsert(SyncService.kUsers, masterAdmin.toMap());
       if (kDebugMode) debugPrint('✅ Master admin ensured in cloud');
     } catch (e) {
-      if (kDebugMode) debugPrint('⚠️ Could not push master admin to cloud: $e');
+      if (kDebugMode) debugPrint('⚠️ Could not push master admin: $e');
     }
   }
 
-  // ── App lifecycle: sync when app comes back to foreground ─────────────────
+  Future<void> _seedMasterAdmin() async {
+    final masterAdmin = AppUser(
+      id: 'master_admin_001',
+      name: 'Aksayal',
+      email: 'aksayal@gmail.com',
+      password: '09101991',
+      role: UserRole.masterAdmin,
+      companyId: null,
+      isApproved: true,
+      hasLoggedInBefore: true,
+    );
+    // Write to cloud first
+    await SyncService.upsert(SyncService.kUsers, masterAdmin.toMap());
+    // Update in-memory
+    _users = [masterAdmin];
+    // Update cache
+    _usersBox.put(masterAdmin.id, jsonEncode(masterAdmin.toMap()));
+    notifyListeners();
+  }
+
+  // ── App lifecycle ─────────────────────────────────────────────────────────
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      // Force a full pull on resume (covers returning from background)
       SyncService.resetAvailability();
       SyncService.resetVersion();
       _syncFromCloud();
     }
   }
 
-  // ── Real-time version polling ─────────────────────────────────────────────
-  // Polls GET /api/sync/version every 5s. Only fetches full data when changed.
+  // ── Periodic version poll (every 3s) ──────────────────────────────────────
   void _startPeriodicSync() {
     _versionTimer?.cancel();
     _versionTimer = Timer.periodic(_versionPollInterval, (_) async {
-      // Lightweight check: is there anything new on the server?
       final changed = await SyncService.hasCloudChanged();
-      if (changed) {
-        if (kDebugMode) debugPrint('🔄 Cloud version changed — pulling full sync');
-        await _syncFromCloud();
-      }
+      if (changed) await _syncFromCloud();
     });
   }
 
@@ -546,12 +554,11 @@ RLA CRM Platform
     _immediateTimer = null;
   }
 
-  /// Schedule a full sync 2 seconds from now.
-  /// Called after any local write so this device quickly confirms the saved state.
+  /// Schedule a cloud pull 1s from now — called after every successful write.
   void _scheduleImmediateSync() {
     _immediateTimer?.cancel();
-    _immediateTimer = Timer(const Duration(seconds: 2), () async {
-      SyncService.resetVersion(); // force a full pull regardless of version
+    _immediateTimer = Timer(const Duration(seconds: 1), () async {
+      SyncService.resetVersion();
       await _syncFromCloud();
     });
   }
@@ -564,294 +571,198 @@ RLA CRM Platform
     super.dispose();
   }
 
-  // ─── Cloud sync: bidirectional merge ─────────────────────────────────────
-  // 1. Pull all remote data + deleted ledger → merge into local Hive
-  // 2. Apply remote deletions to local Hive (propagates admin deletes to all clients)
-  // 3. Push any local records not yet in cloud → ensures local-only records sync
+  // ─── Cloud sync: cloud is the single source of truth ────────────────────
+  // On every pull we REPLACE the in-memory lists and the Hive cache entirely
+  // from cloud data. There is no merge, no push-back, no conflict resolution.
+  // The cloud version always wins.
   Future<void> _syncFromCloud() async {
-    // Prevent concurrent syncs (avoid race conditions)
     if (_syncInProgress) return;
     _syncInProgress = true;
     try {
       final pullResult = await SyncService.pullAll();
+      // If the pull failed (version == -1) keep showing whatever is in memory
+      if (pullResult.version < 0) {
+        if (kDebugMode) debugPrint('⚠️ pullAll failed — keeping current state');
+        return;
+      }
+
       final remote = pullResult.collections;
-      int mergedCount = 0;
 
-      // ── STEP 1: Apply cloud-level deleted_ledger to local Hive ───────────
-      // This is the KEY fix: when an admin deletes a lead on their device,
-      // the cloud records it in the ledger. Every other client (including sales
-      // users) reads the ledger on each sync and deletes the matching local record.
-      int remoteDeletedCount = 0;
-      for (final entry in pullResult.deletedLedger) {
-        final col = entry['collection'] as String? ?? '';
-        final id  = entry['id'] as String? ?? '';
-        if (id.isEmpty) continue;
-
-        // Add to local tombstone so the "push missing records" loop won't re-upload
-        switch (col) {
-          case SyncService.kLeads:
-            _deletedLeadIds.add(id);
-            if (_leadsBox.containsKey(id)) { _leadsBox.delete(id); remoteDeletedCount++; }
-          case SyncService.kProjects:
-            _deletedProjectIds.add(id);
-            if (_projectsBox.containsKey(id)) { _projectsBox.delete(id); remoteDeletedCount++; }
-          case SyncService.kUsers:
-            _deletedUserIds.add(id);
-            if (_usersBox.containsKey(id)) { _usersBox.delete(id); remoteDeletedCount++; }
-          case SyncService.kApprovals:
-            _deletedApprovalIds.add(id);
-            if (_approvalsBox.containsKey(id)) { _approvalsBox.delete(id); remoteDeletedCount++; }
-          case SyncService.kNotifications:
-            _deletedNotifIds.add(id);
-            if (_notifBox.containsKey(id)) { _notifBox.delete(id); remoteDeletedCount++; }
-        }
-      }
-      if (remoteDeletedCount > 0 && kDebugMode) {
-        debugPrint('🗑️ Applied $remoteDeletedCount remote deletion(s) from cloud ledger');
-      }
-
-      // ── Build sets of remote IDs per collection ────────────────────────────
-      final remoteUserIds    = <String>{};
-      final remoteLeadIds    = <String>{};
-      final remoteProjectIds = <String>{};
-      final remoteApprovalIds = <String>{};
-      final remoteNotifIds   = <String>{};
-
-      // ── Merge users ───────────────────────────────────────────────────────
+      // ── Replace in-memory lists entirely from cloud ───────────────────────
       final remoteUsers = remote[SyncService.kUsers] ?? [];
-      for (final raw in remoteUsers) {
-        try {
-          final u = AppUser.fromMap(raw);
-          remoteUserIds.add(u.id);
-          // Last-write-wins: compare timestamps
-          final existing = _usersBox.get(u.id);
-          if (existing == null) {
-            _usersBox.put(u.id, jsonEncode(u.toMap()));
-            mergedCount++;
-          } else {
-            // Remote may be newer — always trust remote for now (cloud is truth)
-            _usersBox.put(u.id, jsonEncode(u.toMap()));
-            mergedCount++;
-          }
-        } catch (e) {
-          if (kDebugMode) debugPrint('⚠️ merge user: $e  raw=$raw');
-        }
-      }
-
-      // ── Merge leads ───────────────────────────────────────────────────────
       final remoteLeads = remote[SyncService.kLeads] ?? [];
-      for (final raw in remoteLeads) {
-        try {
-          final l = Lead.fromMap(raw);
-          remoteLeadIds.add(l.id);
-          // Skip leads that were deleted locally — do not restore them
-          if (_deletedLeadIds.contains(l.id)) continue;
-          _leadsBox.put(l.id, jsonEncode(l.toMap()));
-          mergedCount++;
-        } catch (e) {
-          if (kDebugMode) debugPrint('⚠️ merge lead: $e');
-        }
-      }
-
-      // ── Merge projects ────────────────────────────────────────────────────
       final remoteProjects = remote[SyncService.kProjects] ?? [];
-      for (final raw in remoteProjects) {
-        try {
-          final p = RealEstateProject.fromMap(raw);
-          remoteProjectIds.add(p.id);
-          // Skip projects deleted locally
-          if (_deletedProjectIds.contains(p.id)) continue;
-          _projectsBox.put(p.id, jsonEncode(p.toMap()));
-          mergedCount++;
-        } catch (e) {
-          if (kDebugMode) debugPrint('⚠️ merge project: $e');
-        }
-      }
-
-      // ── Merge approvals ───────────────────────────────────────────────────
       final remoteApprovals = remote[SyncService.kApprovals] ?? [];
-      for (final raw in remoteApprovals) {
-        try {
-          final a = ApprovalRequest.fromMap(raw);
-          remoteApprovalIds.add(a.id);
-          if (_deletedApprovalIds.contains(a.id)) continue;
-          _approvalsBox.put(a.id, jsonEncode(a.toMap()));
-          mergedCount++;
-        } catch (e) {
-          if (kDebugMode) debugPrint('⚠️ merge approval: $e');
+      final remoteNotifs = remote[SyncService.kNotifications] ?? [];
+
+      // Parse — skip any malformed records gracefully
+      final newUsers = <AppUser>[];
+      for (final raw in remoteUsers) {
+        try { newUsers.add(AppUser.fromMap(raw)); } catch (e) {
+          if (kDebugMode) debugPrint('⚠️ parse user: $e');
         }
       }
-
-      // ── Merge notifications ───────────────────────────────────────────────
-      final remoteNotifs = remote[SyncService.kNotifications] ?? [];
+      final newLeads = <Lead>[];
+      for (final raw in remoteLeads) {
+        try { newLeads.add(Lead.fromMap(raw)); } catch (e) {
+          if (kDebugMode) debugPrint('⚠️ parse lead: $e');
+        }
+      }
+      final newProjects = <RealEstateProject>[];
+      for (final raw in remoteProjects) {
+        try { newProjects.add(RealEstateProject.fromMap(raw)); } catch (e) {
+          if (kDebugMode) debugPrint('⚠️ parse project: $e');
+        }
+      }
+      final newApprovals = <ApprovalRequest>[];
+      for (final raw in remoteApprovals) {
+        try { newApprovals.add(ApprovalRequest.fromMap(raw)); } catch (e) {
+          if (kDebugMode) debugPrint('⚠️ parse approval: $e');
+        }
+      }
+      final newNotifs = <CrmNotification>[];
       for (final raw in remoteNotifs) {
         try {
           final n = CrmNotification.fromMap(raw);
-          remoteNotifIds.add(n.id);
-          if (_deletedNotifIds.contains(n.id)) continue;
-          _notifBox.put(n.id, jsonEncode(n.toMap()));
-          mergedCount++;
+          // Preserve local isRead state for notifications we already have
+          final existing = _notifications.where((x) => x.id == n.id);
+          if (existing.isNotEmpty) n.isRead = existing.first.isRead;
+          newNotifs.add(n);
         } catch (e) {
-          if (kDebugMode) debugPrint('⚠️ merge notif: $e');
+          if (kDebugMode) debugPrint('⚠️ parse notif: $e');
         }
       }
 
-      // ── Push local-only records to cloud (upload missing items) ───────────
-      // This ensures records created offline or on a fresh device get synced up
-      int pushedCount = 0;
+      _users         = newUsers;
+      _leads         = newLeads;
+      _projects      = newProjects;
+      _approvals     = newApprovals;
+      _notifications = newNotifs;
 
-      for (final key in _usersBox.keys) {
-        if (_deletedUserIds.contains(key)) continue;
-        if (!remoteUserIds.contains(key)) {
-          try {
-            final u = AppUser.fromMap(Map<String, dynamic>.from(jsonDecode(_usersBox.get(key))));
-            unawaited(SyncService.upsert(SyncService.kUsers, u.toMap()));
-            pushedCount++;
-          } catch (_) {}
-        }
-      }
-      for (final key in _leadsBox.keys) {
-        // Do not push leads that were locally deleted (they stay tombstoned)
-        if (_deletedLeadIds.contains(key)) continue;
-        if (!remoteLeadIds.contains(key)) {
-          try {
-            final l = Lead.fromMap(Map<String, dynamic>.from(jsonDecode(_leadsBox.get(key))));
-            unawaited(SyncService.upsert(SyncService.kLeads, l.toMap()));
-            pushedCount++;
-          } catch (_) {}
-        }
-      }
-      for (final key in _projectsBox.keys) {
-        if (_deletedProjectIds.contains(key)) continue;
-        if (!remoteProjectIds.contains(key)) {
-          try {
-            final p = RealEstateProject.fromMap(Map<String, dynamic>.from(jsonDecode(_projectsBox.get(key))));
-            unawaited(SyncService.upsert(SyncService.kProjects, p.toMap()));
-            pushedCount++;
-          } catch (_) {}
-        }
-      }
-      for (final key in _approvalsBox.keys) {
-        if (_deletedApprovalIds.contains(key)) continue;
-        if (!remoteApprovalIds.contains(key)) {
-          try {
-            final a = ApprovalRequest.fromMap(Map<String, dynamic>.from(jsonDecode(_approvalsBox.get(key))));
-            unawaited(SyncService.upsert(SyncService.kApprovals, a.toMap()));
-            pushedCount++;
-          } catch (_) {}
-        }
-      }
-      for (final key in _notifBox.keys) {
-        if (_deletedNotifIds.contains(key)) continue;
-        if (!remoteNotifIds.contains(key)) {
-          try {
-            final n = CrmNotification.fromMap(Map<String, dynamic>.from(jsonDecode(_notifBox.get(key))));
-            unawaited(SyncService.upsert(SyncService.kNotifications, n.toMap()));
-            pushedCount++;
-          } catch (_) {}
-        }
-      }
+      // ── Update Hive cache (page-refresh speed-up only) ────────────────────
+      await _replaceCache();
 
-      // Always reload + notify so UI reflects latest merged state
-      _loadAll();
       notifyListeners();
 
       if (kDebugMode) {
-        debugPrint('✅ AppState sync complete: '
-            '${remoteUsers.length}↓ users, '
-            '${remoteLeads.length}↓ leads, '
-            '${remoteProjects.length}↓ projects '
-            '| merged=$mergedCount pushed=$pushedCount '
-            '| local: ${_users.length} users');
+        debugPrint('☁️ sync v${pullResult.version}: '
+            '${_users.length}u ${_leads.length}l '
+            '${_projects.length}p ${_approvals.length}a ${_notifications.length}n');
       }
     } catch (e) {
-      if (kDebugMode) debugPrint('⚠️ AppState._syncFromCloud error: $e');
-      _loadAll();
-      notifyListeners();
+      if (kDebugMode) debugPrint('⚠️ _syncFromCloud error: $e');
     } finally {
       _syncInProgress = false;
     }
   }
 
-  /// Push a single user to the cloud (called after every local user save)
-  /// Fires and forgets — failures are logged and retried on next periodic sync.
-  void _syncUser(AppUser u) {
-    SyncService.upsert(SyncService.kUsers, u.toMap()).then((ok) {
-      if (!ok && kDebugMode) debugPrint('⚠️ _syncUser failed: ${u.id}');
-    });
-  }
-  void _syncLead(Lead l) {
-    SyncService.upsert(SyncService.kLeads, l.toMap()).then((ok) {
-      if (!ok && kDebugMode) debugPrint('⚠️ _syncLead failed: ${l.id}');
-    });
-  }
-  void _syncProject(RealEstateProject p) {
-    SyncService.upsert(SyncService.kProjects, p.toMap()).then((ok) {
-      if (!ok && kDebugMode) debugPrint('⚠️ _syncProject failed: ${p.id}');
-    });
-  }
-  void _syncApproval(ApprovalRequest a) {
-    SyncService.upsert(SyncService.kApprovals, a.toMap()).then((ok) {
-      if (!ok && kDebugMode) debugPrint('⚠️ _syncApproval failed: ${a.id}');
-    });
-  }
-  void _syncNotification(CrmNotification n) {
-    SyncService.upsert(SyncService.kNotifications, n.toMap()).then((ok) {
-      if (!ok && kDebugMode) debugPrint('⚠️ _syncNotif failed: ${n.id}');
-    });
+  // ── Replace Hive cache entirely from current in-memory state ─────────────
+  Future<void> _replaceCache() async {
+    await _usersBox.clear();
+    await _leadsBox.clear();
+    await _notifBox.clear();
+    await _projectsBox.clear();
+    await _approvalsBox.clear();
+    for (final u in _users)         { _usersBox.put(u.id,    jsonEncode(u.toMap())); }
+    for (final l in _leads)         { _leadsBox.put(l.id,    jsonEncode(l.toMap())); }
+    for (final n in _notifications) { _notifBox.put(n.id,    jsonEncode(n.toMap())); }
+    for (final p in _projects)      { _projectsBox.put(p.id, jsonEncode(p.toMap())); }
+    for (final a in _approvals)     { _approvalsBox.put(a.id, jsonEncode(a.toMap())); }
   }
 
-  void _loadAll() {
-    _users = _usersBox.values.map((v) => AppUser.fromMap(Map<String, dynamic>.from(jsonDecode(v)))).toList();
-    _leads = _leadsBox.values.map((v) => Lead.fromMap(Map<String, dynamic>.from(jsonDecode(v)))).toList();
-    _notifications = _notifBox.values.map((v) => CrmNotification.fromMap(Map<String, dynamic>.from(jsonDecode(v)))).toList();
-    _projects = _projectsBox.values.map((v) => RealEstateProject.fromMap(Map<String, dynamic>.from(jsonDecode(v)))).toList();
-    _approvals = _approvalsBox.values.map((v) => ApprovalRequest.fromMap(Map<String, dynamic>.from(jsonDecode(v)))).toList();
-    _emailLogs = _emailLogsBox.values.map((v) => EmailLog.fromMap(Map<String, dynamic>.from(jsonDecode(v)))).toList();
+  // ─── Cache load (page-refresh speed-up only) ─────────────────────────────
+  // Populates in-memory lists from Hive so the UI is non-empty during the
+  // ~300ms before the first cloud pull completes. This is READ-ONLY;
+  // the data is immediately replaced by the cloud pull that follows.
+  void _loadFromCache() {
+    try {
+      _users = _usersBox.values
+          .map((v) => AppUser.fromMap(Map<String, dynamic>.from(jsonDecode(v as String))))
+          .toList();
+    } catch (_) { _users = []; }
+    try {
+      _leads = _leadsBox.values
+          .map((v) => Lead.fromMap(Map<String, dynamic>.from(jsonDecode(v as String))))
+          .toList();
+    } catch (_) { _leads = []; }
+    try {
+      _notifications = _notifBox.values
+          .map((v) => CrmNotification.fromMap(Map<String, dynamic>.from(jsonDecode(v as String))))
+          .toList();
+    } catch (_) { _notifications = []; }
+    try {
+      _projects = _projectsBox.values
+          .map((v) => RealEstateProject.fromMap(Map<String, dynamic>.from(jsonDecode(v as String))))
+          .toList();
+    } catch (_) { _projects = []; }
+    try {
+      _approvals = _approvalsBox.values
+          .map((v) => ApprovalRequest.fromMap(Map<String, dynamic>.from(jsonDecode(v as String))))
+          .toList();
+    } catch (_) { _approvals = []; }
+    try {
+      _emailLogs = _emailLogsBox.values
+          .map((v) => EmailLog.fromMap(Map<String, dynamic>.from(jsonDecode(v as String))))
+          .toList();
+    } catch (_) { _emailLogs = []; }
   }
 
-  void _seedData() {
-    // ── Master Admin only ─────────────────────────────────────────────────
-    final masterAdmin = AppUser(
-      id: 'master_admin_001',
-      name: 'Aksayal',
-      email: 'aksayal@gmail.com',
-      password: '09101991',
-      role: UserRole.masterAdmin,
-      companyId: null,
-      isApproved: true,
-      hasLoggedInBefore: true,
-    );
-    _saveUser(masterAdmin);
-    _loadAll();
-  }
+  // ─── Write helpers: cloud-first ───────────────────────────────────────────
+  // 1. Update in-memory list immediately (optimistic UI update)
+  // 2. Write to cloud — on failure the retry queue will re-send
+  // 3. Schedule an immediate re-pull (1s) to confirm cloud state
+  // Hive cache is updated by _replaceCache() which runs on every cloud pull.
 
   void _saveUser(AppUser u) {
-    _usersBox.put(u.id, jsonEncode(u.toMap()));
-    _syncUser(u);
+    // Optimistic update
+    _users = [ ..._users.where((x) => x.id != u.id), u ];
+    SyncService.upsert(SyncService.kUsers, u.toMap()).then((ok) {
+      if (!ok && kDebugMode) debugPrint('⚠️ _saveUser cloud failed: ${u.id} — queued');
+    });
     _scheduleImmediateSync();
+    notifyListeners();
   }
+
   void _saveLead(Lead l) {
-    _leadsBox.put(l.id, jsonEncode(l.toMap()));
-    _syncLead(l);
+    _leads = [ ..._leads.where((x) => x.id != l.id), l ];
+    SyncService.upsert(SyncService.kLeads, l.toMap()).then((ok) {
+      if (!ok && kDebugMode) debugPrint('⚠️ _saveLead cloud failed: ${l.id} — queued');
+    });
     _scheduleImmediateSync();
+    notifyListeners();
   }
+
   void _saveNotification(CrmNotification n) {
-    _notifBox.put(n.id, jsonEncode(n.toMap()));
-    _syncNotification(n);
-    // Notifications don't need immediate re-sync (read status changes are local-only)
+    _notifications = [ ..._notifications.where((x) => x.id != n.id), n ];
+    SyncService.upsert(SyncService.kNotifications, n.toMap()).then((ok) {
+      if (!ok && kDebugMode) debugPrint('⚠️ _saveNotif cloud failed: ${n.id} — queued');
+    });
+    // isRead changes are local only — no immediate re-sync needed
+    notifyListeners();
   }
+
   void _saveProject(RealEstateProject p) {
-    _projectsBox.put(p.id, jsonEncode(p.toMap()));
-    _syncProject(p);
+    _projects = [ ..._projects.where((x) => x.id != p.id), p ];
+    SyncService.upsert(SyncService.kProjects, p.toMap()).then((ok) {
+      if (!ok && kDebugMode) debugPrint('⚠️ _saveProject cloud failed: ${p.id} — queued');
+    });
     _scheduleImmediateSync();
+    notifyListeners();
   }
+
   void _saveApproval(ApprovalRequest a) {
-    _approvalsBox.put(a.id, jsonEncode(a.toMap()));
-    _syncApproval(a);
+    _approvals = [ ..._approvals.where((x) => x.id != a.id), a ];
+    SyncService.upsert(SyncService.kApprovals, a.toMap()).then((ok) {
+      if (!ok && kDebugMode) debugPrint('⚠️ _saveApproval cloud failed: ${a.id} — queued');
+    });
     _scheduleImmediateSync();
+    notifyListeners();
   }
-  void _saveEmailLog(EmailLog e) => _emailLogsBox.put(e.id, jsonEncode(e.toMap()));
+
+  void _saveEmailLog(EmailLog e) {
+    _emailLogs = [ ..._emailLogs.where((x) => x.id != e.id), e ];
+    _emailLogsBox.put(e.id, jsonEncode(e.toMap()));
+  }
 
   // ─── Email Simulation ─────────────────────────────────────────────────────
   void _sendEmail({
@@ -973,7 +884,7 @@ RLA CRM Platform
     );
     _saveUser(updated);
     _currentUser = updated;
-    _loadAll();
+    
     notifyListeners();
   }
 
@@ -1018,7 +929,7 @@ RLA CRM Platform
       role: 'sales',
     );
     _saveApproval(req);
-    _loadAll();
+    
     notifyListeners();
 
     // Notify project admins
@@ -1132,7 +1043,7 @@ RLA CRM Platform
         } catch (_) {}
       }
 
-      _loadAll();
+      
       notifyListeners();
 
       _sendEmail(
@@ -1166,7 +1077,7 @@ RLA CRM Platform
       req.reviewNote = note;
       req.updatedAt = DateTime.now();
       _saveApproval(req);
-      _loadAll();
+      
       notifyListeners();
 
       _sendEmail(
@@ -1266,7 +1177,7 @@ RLA CRM Platform
       _saveProject(updatedProject);
     }
 
-    _loadAll();
+    
     notifyListeners();
     _sendEmail(
       toEmail: email,
@@ -1354,7 +1265,7 @@ RLA CRM Platform
       _saveProject(updatedProject);
     }
 
-    _loadAll();
+    
     notifyListeners();
     return null;
   }
@@ -1406,7 +1317,7 @@ RLA CRM Platform
       } catch (_) {}
     }
 
-    _loadAll();
+    
     notifyListeners();
     return null;
   }
@@ -1430,7 +1341,7 @@ RLA CRM Platform
       hasLoggedInBefore: false,
     );
     _saveUser(user);
-    _loadAll();
+    
     notifyListeners();
 
     _sendEmail(
@@ -1461,25 +1372,23 @@ RLA CRM Platform
       _users.where((u) => u.role == UserRole.masterAdmin).toList();
 
   // ─── CRUD: Projects ───────────────────────────────────────────────────────
-  void addProject(RealEstateProject p) { _saveProject(p); _loadAll(); notifyListeners(); }
-  void updateProject(RealEstateProject p) { p.updatedAt = DateTime.now(); _saveProject(p); _loadAll(); notifyListeners(); }
+  void addProject(RealEstateProject p) { _saveProject(p); }
+  void updateProject(RealEstateProject p) { p.updatedAt = DateTime.now(); _saveProject(p); }
   void deleteProject(String id) {
-    _deletedProjectIds.add(id);
-    _projectsBox.delete(id);
-    _loadAll();
+    _projects = _projects.where((p) => p.id != id).toList();
     notifyListeners();
     SyncService.delete(SyncService.kProjects, id);
+    _scheduleImmediateSync();
   }
 
   // ─── CRUD: Users ──────────────────────────────────────────────────────────
-  void addUser(AppUser u) { _saveUser(u); _loadAll(); notifyListeners(); }
-  void updateUser(AppUser u) { _saveUser(u); _loadAll(); notifyListeners(); }
+  void addUser(AppUser u) { _saveUser(u); }
+  void updateUser(AppUser u) { _saveUser(u); }
   void deleteUser(String id) {
-    _deletedUserIds.add(id);
-    _usersBox.delete(id);
-    _loadAll();
+    _users = _users.where((u) => u.id != id).toList();
     notifyListeners();
     SyncService.delete(SyncService.kUsers, id);
+    _scheduleImmediateSync();
   }
 
   /// Add a user and also assign them to the given project's assignedSalesIds list.
@@ -1523,8 +1432,6 @@ RLA CRM Platform
         }
       } catch (_) {}
     }
-    _loadAll();
-    notifyListeners();
   }
 
   void toggleUserActive(String id) {
@@ -1538,32 +1445,25 @@ RLA CRM Platform
         projectIds: u.projectIds,
       );
       _saveUser(updated);
-      _loadAll();
-      notifyListeners();
     } catch (_) {}
   }
 
   // ─── CRUD: Leads ──────────────────────────────────────────────────────────
-  void addLead(Lead l) { _saveLead(l); _loadAll(); notifyListeners(); }
-  void updateLead(Lead l) { l.updatedAt = DateTime.now(); _saveLead(l); _loadAll(); notifyListeners(); }
+  void addLead(Lead l) { _saveLead(l); }
+  void updateLead(Lead l) { l.updatedAt = DateTime.now(); _saveLead(l); }
   void deleteLead(String id) {
-    _deletedLeadIds.add(id);          // tombstone: prevent re-pull from cloud
-    _leadsBox.delete(id);             // remove locally
-    _scheduleImmediateSync();         // verify deletion is reflected quickly
-    _loadAll();
+    _leads = _leads.where((l) => l.id != id).toList();
     notifyListeners();
-    // Fire cloud delete — if it fails, tombstone prevents re-pull on next sync
     SyncService.delete(SyncService.kLeads, id).then((ok) {
-      if (!ok && kDebugMode) debugPrint('⚠️ Cloud delete failed for lead $id — tombstoned locally');
+      if (!ok && kDebugMode) debugPrint('⚠️ Cloud delete failed for lead $id — will retry');
     });
+    _scheduleImmediateSync();
   }
 
   // ─── CRUD: Notifications ──────────────────────────────────────────────────
-  void addNotification(CrmNotification n) { _saveNotification(n); _loadAll(); notifyListeners(); }
+  void addNotification(CrmNotification n) { _saveNotification(n); }
   void deleteNotification(String id) {
-    _deletedNotifIds.add(id);
-    _notifBox.delete(id);
-    _loadAll();
+    _notifications = _notifications.where((n) => n.id != id).toList();
     notifyListeners();
     SyncService.delete(SyncService.kNotifications, id);
   }
@@ -1572,8 +1472,6 @@ RLA CRM Platform
       final n = _notifications.firstWhere((n) => n.id == id);
       n.isRead = true;
       _saveNotification(n);
-      _loadAll();
-      notifyListeners();
     } catch (_) {}
   }
   void markAllNotificationsRead() {
@@ -1581,7 +1479,6 @@ RLA CRM Platform
       n.isRead = true;
       _saveNotification(n);
     }
-    _loadAll();
     notifyListeners();
   }
 
@@ -1617,35 +1514,31 @@ RLA CRM Platform
         hasLoggedInBefore: true,
       );
 
-      // 3. Flush local Hive boxes
+      // 3. Clear in-memory state immediately
+      _users         = [masterAdmin];
+      _leads         = [];
+      _projects      = [];
+      _approvals     = [];
+      _notifications = [];
+      _emailLogs     = [];
+      notifyListeners();
+
+      // 4. Flush Hive cache and re-seed master admin
       await _usersBox.clear();
       await _leadsBox.clear();
       await _projectsBox.clear();
       await _approvalsBox.clear();
       await _notifBox.clear();
       await _emailLogsBox.clear();
-
-      // 4. Clear all in-memory tombstone sets so flush is clean
-      _deletedLeadIds.clear();
-      _deletedProjectIds.clear();
-      _deletedUserIds.clear();
-      _deletedNotifIds.clear();
-      _deletedApprovalIds.clear();
-
-      // 5. Re-save master admin locally
       _usersBox.put(masterAdmin.id, jsonEncode(masterAdmin.toMap()));
 
-      // 6. Reload in-memory state (all lists except master admin user)
-      _loadAll();
-      notifyListeners();
-
-      // 7. Flush the cloud (delete all records except master admin user)
+      // 5. Flush the cloud (delete all records except master admin user)
       await SyncService.flushCloudExceptMasterAdmin(masterAdminId: masterAdminId);
 
-      // 8. Re-push master admin to cloud to ensure it is preserved
+      // 6. Re-push master admin to cloud to ensure it is preserved
       await SyncService.upsert(SyncService.kUsers, masterAdmin.toMap());
 
-      // 9. Restart sync timers
+      // 7. Restart sync timers
       _startPeriodicSync();
 
       if (kDebugMode) debugPrint('✅ Platform flush complete — master admin preserved');
