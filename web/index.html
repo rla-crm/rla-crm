@@ -57,6 +57,23 @@
 
   <title>RLA crm</title>
 
+  <!-- ── Firebase JS SDK v11.9.1
+       Pre-load all modules and assign to window.* so that firebase_core_web
+       finds them instantly (no dynamic import needed, bypasses CSP/TrustedTypes).
+  ── -->
+  <script type="module">
+    import * as firebase_core      from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
+    import * as firebase_firestore from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
+    import * as firebase_auth      from "https://www.gstatic.com/firebasejs/11.9.1/firebase-auth.js";
+    import * as firebase_storage   from "https://www.gstatic.com/firebasejs/11.9.1/firebase-storage.js";
+    // Expose on window so flutter firebase_core_web interop can find them
+    window.firebase_core      = firebase_core;
+    window.firebase_firestore = firebase_firestore;
+    window.firebase_auth      = firebase_auth;
+    window.firebase_storage   = firebase_storage;
+    console.log('[RLA CRM] Firebase JS SDK loaded:', firebase_core.SDK_VERSION);
+  </script>
+
   <!-- ── PDF.js (required by flutter printing package for web PDF preview) ── -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script>
