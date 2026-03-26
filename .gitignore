@@ -31,3 +31,4 @@ Thumbs.db
 # Keep lib/ directory for source code!
 
 .github/workflows/
+android/app/google-services.json

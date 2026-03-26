@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'models.dart';
 import '../services/sync_service.dart';
 
@@ -37,18 +38,20 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   List<EmailLog> _emailLogs = [];
 
   // ─── Real-time sync infrastructure ────────────────────────────────────────
-  // CLOUD IS THE SINGLE SOURCE OF TRUTH.
-  //
-  //  _versionTimer  (every 3s, lightweight)
-  //    → polls GET /api/sync/version
-  //    → triggers a full pullAll only when version changed
-  //
-  //  _immediateTimer (one-shot, fires 1s after any write)
-  //    → forces a full re-pull to confirm the cloud write landed
+  // FIREBASE FIRESTORE is the single source of truth.
+  // Real-time Firestore snapshots push changes to all devices instantly.
+  // _versionTimer is kept as a fallback poll every 5s.
   Timer? _versionTimer;
   Timer? _immediateTimer;
-  static const Duration _versionPollInterval = Duration(seconds: 3);
+  static const Duration _versionPollInterval = Duration(seconds: 5);
   bool _syncInProgress = false;
+
+  // Firestore real-time stream subscriptions
+  StreamSubscription? _usersStream;
+  StreamSubscription? _leadsStream;
+  StreamSubscription? _projectsStream;
+  StreamSubscription? _approvalsStream;
+  StreamSubscription? _notifsStream;
 
   // NOTE: Tombstone sets are kept ONLY for the flush operation —
   // they are NOT used during normal sync (cloud data replaces local wholesale).
@@ -548,13 +551,76 @@ RLA CRM Platform
     }
   }
 
-  // ── Periodic version poll (every 3s) ──────────────────────────────────────
+  // ── Firestore real-time streams (instant sync across all devices) ───────────
   void _startPeriodicSync() {
     _versionTimer?.cancel();
-    _versionTimer = Timer.periodic(_versionPollInterval, (_) async {
-      final changed = await SyncService.hasCloudChanged();
-      if (changed) await _syncFromCloud();
+    _usersStream?.cancel();
+    _leadsStream?.cancel();
+    _projectsStream?.cancel();
+    _approvalsStream?.cancel();
+    _notifsStream?.cancel();
+
+    _usersStream = SyncService.watchCollection(SyncService.kUsers).listen((docs) {
+      final newUsers = <AppUser>[];
+      for (final raw in docs) {
+        try { newUsers.add(AppUser.fromMap(raw)); } catch (e) {
+          if (kDebugMode) debugPrint('⚠️ stream user: $e');
+        }
+      }
+      _users = newUsers;
+      notifyListeners();
     });
+
+    _leadsStream = SyncService.watchCollection(SyncService.kLeads).listen((docs) {
+      final items = <Lead>[];
+      for (final raw in docs) {
+        try { items.add(Lead.fromMap(raw)); } catch (e) {
+          if (kDebugMode) debugPrint('⚠️ stream lead: $e');
+        }
+      }
+      _leads = items;
+      notifyListeners();
+    });
+
+    _projectsStream = SyncService.watchCollection(SyncService.kProjects).listen((docs) {
+      final items = <RealEstateProject>[];
+      for (final raw in docs) {
+        try { items.add(RealEstateProject.fromMap(raw)); } catch (e) {
+          if (kDebugMode) debugPrint('⚠️ stream project: $e');
+        }
+      }
+      _projects = items;
+      notifyListeners();
+    });
+
+    _approvalsStream = SyncService.watchCollection(SyncService.kApprovals).listen((docs) {
+      final items = <ApprovalRequest>[];
+      for (final raw in docs) {
+        try { items.add(ApprovalRequest.fromMap(raw)); } catch (e) {
+          if (kDebugMode) debugPrint('⚠️ stream approval: $e');
+        }
+      }
+      _approvals = items;
+      notifyListeners();
+    });
+
+    _notifsStream = SyncService.watchCollection(SyncService.kNotifications).listen((docs) {
+      final items = <CrmNotification>[];
+      for (final raw in docs) {
+        try {
+          final n = CrmNotification.fromMap(raw);
+          final existing = _notifications.where((x) => x.id == n.id);
+          if (existing.isNotEmpty) n.isRead = existing.first.isRead;
+          items.add(n);
+        } catch (e) {
+          if (kDebugMode) debugPrint('⚠️ stream notif: $e');
+        }
+      }
+      _notifications = items;
+      notifyListeners();
+    });
+
+    if (kDebugMode) debugPrint('🔥 Firestore real-time streams started');
   }
 
   void _stopPeriodicSync() {
@@ -562,26 +628,20 @@ RLA CRM Platform
     _versionTimer = null;
     _immediateTimer?.cancel();
     _immediateTimer = null;
+    _usersStream?.cancel();
+    _leadsStream?.cancel();
+    _projectsStream?.cancel();
+    _approvalsStream?.cancel();
+    _notifsStream?.cancel();
   }
 
-  /// Schedule a cloud pull 3s after a confirmed write.
-  /// 3s gives the cloud storage enough time to persist before we re-pull.
-  /// Does NOT reset version — lets the normal version poll detect the change
-  /// so the periodic timer doesn't race against this timer.
-  void _scheduleImmediateSync() {
-    _immediateTimer?.cancel();
-    _immediateTimer = Timer(const Duration(seconds: 3), () async {
-      // Don't reset version here — the upsert already updated _lastKnownVersion.
-      // Just force a fresh pull to confirm cloud state matches local state.
-      await _forcePullFromCloud();
-    });
-  }
+  // Firestore streams handle sync automatically — this is a no-op kept for compat.
+  void _scheduleImmediateSync() {}
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _stopPeriodicSync();
-    SyncService.stopRetryTimer();
     super.dispose();
   }
 
@@ -1565,7 +1625,7 @@ RLA CRM Platform
       _usersBox.put(masterAdmin.id, jsonEncode(masterAdmin.toMap()));
 
       // 5. Flush the cloud (delete all records except master admin user)
-      await SyncService.flushCloudExceptMasterAdmin(masterAdminId: masterAdminId);
+      await SyncService.flushCloudExceptMasterAdmin(masterAdminId);
 
       // 6. Re-push master admin to cloud to ensure it is preserved
       await SyncService.upsert(SyncService.kUsers, masterAdmin.toMap());
