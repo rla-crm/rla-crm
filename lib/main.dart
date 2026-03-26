@@ -13,6 +13,7 @@ import 'screens/admin_dashboard.dart';
 import 'screens/sales_dashboard.dart';
 import 'screens/master_admin_dashboard.dart';
 
+// v15.4 — project card gradient fix (cache bust)
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setSystemUIOverlayStyle(

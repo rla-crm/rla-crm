@@ -159,6 +159,27 @@
     <button id="pwa-dismiss-btn">✕</button>
   </div>
 
+
+  <script>
+    // Force clear all service workers and caches on every load
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(regs => {
+        regs.forEach(reg => {
+          console.log('[Cache Bust] Unregistering SW:', reg.scope);
+          reg.unregister();
+        });
+      });
+      // Clear all caches
+      if ('caches' in window) {
+        caches.keys().then(keys => {
+          keys.forEach(key => {
+            console.log('[Cache Bust] Deleting cache:', key);
+            caches.delete(key);
+          });
+        });
+      }
+    }
+  </script>
   <!-- Flutter app -->
   <script src="flutter_bootstrap.js" async></script>
 
