@@ -362,8 +362,7 @@ class _ProjectCard extends StatelessWidget {
     final leads = state.companyLeads.where((l) => l.projectId == project.id).toList();
     final closed = leads.where((l) => l.status == LeadStatus.closed).length;
     final siteVisit = leads.where((l) => l.status == LeadStatus.siteVisit).length;
-    final grads = [AppColors.gradientPrimary, AppColors.gradientSecondary, AppColors.gradientTertiary, AppColors.gradientSuccess];
-    final grad = grads[project.id.hashCode % grads.length];
+    const grad = AppColors.gradientCTA;
     final assignedNames = project.assignedSalesIds.map((id) {
       try { return state.users.firstWhere((u) => u.id == id).name.split(' ').first; } catch (_) { return ''; }
     }).where((n) => n.isNotEmpty).toList();
