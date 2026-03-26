@@ -28,9 +28,9 @@ class AppColors {
   static const Color mint = Color(0xFFB8FFE4);
   static const Color teal = Color(0xFF7FE0C2);
 
-  // Deep green gradient for success banners/cards (white text readable on top)
-  static const Color successDeep = Color(0xFF1A8F5C);
-  static const Color successDark = Color(0xFF0D6B47);
+  // Soft mint gradient (matches pastel theme palette)
+  static const Color successDeep = Color(0xFFB8FFE4);
+  static const Color successDark = Color(0xFF7FE0C2);
 
   // Pipeline stage colors
   static const Color stageNew = Color(0xFFC9B8FF);
@@ -57,7 +57,7 @@ class AppColors {
     end: Alignment.bottomRight,
   );
   static const LinearGradient gradientSuccess = LinearGradient(
-    colors: [successDeep, successDark],
+    colors: [mint, teal],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
