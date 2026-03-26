@@ -916,9 +916,9 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
       Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: const Color(0xFFB8FFE4).withValues(alpha: 0.3),
+          color: AppColors.sky.withValues(alpha: 0.3),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFF40C080).withValues(alpha: 0.4)),
+          border: Border.all(color: AppColors.cyan.withValues(alpha: 0.4)),
         ),
         child: Row(children: [
           const Icon(Icons.check_circle_outline_rounded, size: 16, color: Color(0xFF3B8A6E)),

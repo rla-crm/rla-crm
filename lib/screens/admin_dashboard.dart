@@ -1019,7 +1019,7 @@ class _ProfileSheet extends StatelessWidget {
           if (projectName != null && projectName.isNotEmpty) ...[
             const SizedBox(height: 6),
             Text(projectName, style: GoogleFonts.inter(fontSize: 12, color: AppColors.textSecondary)),
-            StatusPill(label: 'Active', color: const Color(0xFFB8FFE4), isSmall: true),
+            StatusPill(label: 'Active', color: AppColors.sky, isSmall: true),
           ],
           const SizedBox(height: 24),
           GradientButton(

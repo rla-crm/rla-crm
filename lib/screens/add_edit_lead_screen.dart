@@ -579,19 +579,19 @@ class _AddEditLeadScreenState extends State<AddEditLeadScreen> {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF1A8F5C).withValues(alpha: 0.08),
+                    color: AppColors.sky.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: const Color(0xFF1A8F5C).withValues(alpha: 0.35)),
+                    border: Border.all(color: AppColors.cyan.withValues(alpha: 0.5)),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
                         children: [
-                          const Icon(Icons.monetization_on_rounded, size: 15, color: Color(0xFF1A8F5C)),
+                          const Icon(Icons.monetization_on_rounded, size: 15, color: AppColors.cyan),
                           const SizedBox(width: 6),
                           Text('Closed Deal Value',
-                              style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w700, color: const Color(0xFF1A8F5C))),
+                              style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.cyan)),
                         ],
                       ),
                       const SizedBox(height: 2),

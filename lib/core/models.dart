@@ -72,7 +72,7 @@ extension LeadStatusExt on LeadStatus {
       case LeadStatus.contacted: return const Color(0xFFB8EEFF);
       case LeadStatus.siteVisit: return const Color(0xFFFFD4A8);
       case LeadStatus.negotiation: return const Color(0xFFFFB8D9);
-      case LeadStatus.closed: return const Color(0xFFB8FFE4);
+      case LeadStatus.closed: return const Color(0xFFB8EEFF);
       case LeadStatus.lost: return const Color(0xFFE0E0E8);
     }
   }
@@ -129,7 +129,7 @@ extension ProjectStatusExt on ProjectStatus {
 
   Color get color {
     switch (this) {
-      case ProjectStatus.active: return const Color(0xFFB8FFE4);
+      case ProjectStatus.active: return const Color(0xFFB8EEFF);
       case ProjectStatus.onHold: return const Color(0xFFFFD4A8);
       case ProjectStatus.completed: return const Color(0xFFC9B8FF);
     }
@@ -148,7 +148,7 @@ extension ApprovalStatusExt on ApprovalStatus {
   Color get color {
     switch (this) {
       case ApprovalStatus.pending: return const Color(0xFFFFD4A8);
-      case ApprovalStatus.approved: return const Color(0xFFB8FFE4);
+      case ApprovalStatus.approved: return const Color(0xFFB8EEFF);
       case ApprovalStatus.rejected: return const Color(0xFFFFB8D9);
     }
   }

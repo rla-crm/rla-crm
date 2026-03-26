@@ -155,7 +155,7 @@ class AnalyticsScreen extends StatelessWidget {
                 decoration: BoxDecoration(
                   gradient: AppColors.gradientSuccess,
                   borderRadius: BorderRadius.circular(14),
-                  boxShadow: [BoxShadow(color: const Color(0xFF0D6B47).withValues(alpha: 0.3), blurRadius: 12, offset: const Offset(0, 4))],
+                  boxShadow: [BoxShadow(color: AppColors.cyan.withValues(alpha: 0.3), blurRadius: 12, offset: const Offset(0, 4))],
                 ),
                 child: Row(
                   children: [

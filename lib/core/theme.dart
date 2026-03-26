@@ -28,16 +28,16 @@ class AppColors {
   static const Color mint = Color(0xFFB8FFE4);
   static const Color teal = Color(0xFF7FE0C2);
 
-  // Soft mint gradient (matches pastel theme palette)
-  static const Color successDeep = Color(0xFFB8FFE4);
-  static const Color successDark = Color(0xFF7FE0C2);
+  // Sky gradient (matches pastel theme palette)
+  static const Color successDeep = Color(0xFFB8EEFF);
+  static const Color successDark = Color(0xFF7FD9F0);
 
   // Pipeline stage colors
   static const Color stageNew = Color(0xFFC9B8FF);
   static const Color stageContacted = Color(0xFFB8EEFF);
   static const Color stageSiteVisit = Color(0xFFFFD4A8);
   static const Color stageNegotiation = Color(0xFFFFB8D9);
-  static const Color stageClosed = Color(0xFFB8FFE4);
+  static const Color stageClosed = Color(0xFFB8EEFF);
   static const Color stageLost = Color(0xFFE0E0E8);
 
   // Gradients
@@ -57,7 +57,7 @@ class AppColors {
     end: Alignment.bottomRight,
   );
   static const LinearGradient gradientSuccess = LinearGradient(
-    colors: [mint, teal],
+    colors: [sky, cyan],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );

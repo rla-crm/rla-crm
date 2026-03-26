@@ -2159,10 +2159,10 @@ class _MasterProjectsScreenState extends State<_MasterProjectsScreen> {
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: Row(children: [
-                  const Icon(Icons.monetization_on_outlined, size: 15, color: Color(0xFF1A8F5C)),
+                  const Icon(Icons.monetization_on_outlined, size: 15, color: AppColors.cyan),
                   const SizedBox(width: 8),
                   Text('Closed Revenue: ', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted)),
-                  Text(fmt(revenue), style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: const Color(0xFF1A8F5C))),
+                  Text(fmt(revenue), style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.cyan)),
                 ]),
               ),
             ],
@@ -2493,7 +2493,7 @@ class _MasterProjectsScreenState extends State<_MasterProjectsScreen> {
                                     Row(children: [
                                       _miniStat('${leads.length}', 'Leads', AppColors.lavender),
                                       const SizedBox(width: 10),
-                                      _miniStat('$closedCount', 'Closed', const Color(0xFF1A8F5C)),
+                                      _miniStat('$closedCount', 'Closed', AppColors.cyan),
                                       if (revenue > 0) ...[
                                         const SizedBox(width: 10),
                                         _miniStat(fmtR(revenue), 'Revenue', AppColors.peach),
@@ -2925,7 +2925,7 @@ class _MasterSettingsScreenState extends State<_MasterSettingsScreen> {
                   style: GoogleFonts.inter(color: Colors.white)),
             ],
           ),
-          backgroundColor: Colors.green,
+          backgroundColor: AppColors.sky,
           duration: const Duration(seconds: 5),
         ),
       );
@@ -3080,11 +3080,11 @@ class _MasterSettingsScreenState extends State<_MasterSettingsScreen> {
                       const Divider(height: 16),
                       Text('What will be preserved:',
                           style: GoogleFonts.inter(
-                              fontSize: 12, fontWeight: FontWeight.w600, color: Colors.green)),
+                              fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.cyan)),
                       const SizedBox(height: 8),
                       Row(
                         children: [
-                          const Icon(Icons.check_circle_outline, color: Colors.green, size: 14),
+                          const Icon(Icons.check_circle_outline, color: AppColors.cyan, size: 14),
                           const SizedBox(width: 8),
                           Text('Master admin login credentials (email & password)',
                               style: GoogleFonts.inter(

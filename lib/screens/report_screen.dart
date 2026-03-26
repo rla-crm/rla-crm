@@ -163,7 +163,7 @@ Future<Uint8List> buildReportPdf({
       case LeadStatus.negotiation:
         return PdfColor.fromHex('#FFB8D9');
       case LeadStatus.closed:
-        return PdfColor.fromHex('#B8FFE4');
+        return PdfColor.fromHex('#B8EEFF');
       case LeadStatus.lost:
         return PdfColor.fromHex('#FFB347');
     }
@@ -302,7 +302,7 @@ Future<Uint8List> buildReportPdf({
               PdfColor.fromHex('#FFD4A8')),
           pw.SizedBox(width: 8),
           _kpiBox('Closed', '$closedLeads',
-              PdfColor.fromHex('#B8FFE4')),
+              PdfColor.fromHex('#B8EEFF')),
           pw.SizedBox(width: 8),
           _kpiBox('Conv.%',
               '${convRate.toStringAsFixed(1)}%',
@@ -636,7 +636,7 @@ class _ReportPreviewSheetState extends State<ReportPreviewSheet> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('PDF downloaded: $fname'),
-              backgroundColor: Colors.green.shade700,
+              backgroundColor: const Color(0xFF7FD9F0),
               behavior: SnackBarBehavior.floating,
             ),
           );
