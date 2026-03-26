@@ -1,0 +1,21 @@
+# Force browsers to always revalidate service worker and index
+/flutter_service_worker.js
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+
+/sw.js
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+
+/index.html
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+
+/flutter_bootstrap.js
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+
+# Allow Firestore SDK to load cross-origin scripts
+/*
+  Access-Control-Allow-Origin: *
+  X-Frame-Options: ALLOWALL
