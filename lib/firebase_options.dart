@@ -22,7 +22,7 @@ class DefaultFirebaseOptions {
     projectId: 'rla-crm',
     storageBucket: 'rla-crm.firebasestorage.app',
     messagingSenderId: '753567723562',
-    appId: '1:753567723562:web:0c531585a3a43199161353',
+    appId: '1:753567723562:web:db30b1a30e01d2ab161353',
   );
 
   static const FirebaseOptions android = FirebaseOptions(

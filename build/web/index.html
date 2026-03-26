@@ -57,23 +57,6 @@
 
   <title>RLA crm</title>
 
-  <!-- ── Firebase JS SDK v11.9.1
-       Pre-load all modules and assign to window.* so that firebase_core_web
-       finds them instantly (no dynamic import needed, bypasses CSP/TrustedTypes).
-  ── -->
-  <script type="module">
-    import * as firebase_core      from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
-    import * as firebase_firestore from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
-    import * as firebase_auth      from "https://www.gstatic.com/firebasejs/11.9.1/firebase-auth.js";
-    import * as firebase_storage   from "https://www.gstatic.com/firebasejs/11.9.1/firebase-storage.js";
-    // Expose on window so flutter firebase_core_web interop can find them
-    window.firebase_core      = firebase_core;
-    window.firebase_firestore = firebase_firestore;
-    window.firebase_auth      = firebase_auth;
-    window.firebase_storage   = firebase_storage;
-    console.log('[RLA CRM] Firebase JS SDK loaded:', firebase_core.SDK_VERSION);
-  </script>
-
   <!-- ── PDF.js (required by flutter printing package for web PDF preview) ── -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script>
@@ -180,37 +163,14 @@
   <script src="flutter_bootstrap.js" async></script>
 
   <script>
-    // ── Service Worker registration ──────────────────────────
+    // ── Unregister ALL old service workers so stale caches don't block load ──
     if ('serviceWorker' in navigator) {
-      window.addEventListener('load', function() {
-        navigator.serviceWorker.register('/sw.js')
-          .then(reg => {
-            console.log('SW registered:', reg.scope);
-            // Force-activate new service worker immediately (clears stale caches)
-            if (reg.waiting) {
-              reg.waiting.postMessage('SKIP_WAITING');
-            }
-            reg.addEventListener('updatefound', () => {
-              const newWorker = reg.installing;
-              if (newWorker) {
-                newWorker.addEventListener('statechange', () => {
-                  if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                    // New version installed — force skip waiting so Chrome gets latest
-                    newWorker.postMessage('SKIP_WAITING');
-                  }
-                });
-              }
-            });
-          })
-          .catch(err => console.log('SW error:', err));
-        
-        // Listen for SW controller change and reload to get fresh app
-        navigator.serviceWorker.addEventListener('controllerchange', () => {
-          console.log('[SW] Controller changed — reloading for fresh data');
-          // Only reload if we haven't recently reloaded (prevent loops)
-          if (!sessionStorage.getItem('sw-reloaded')) {
-            sessionStorage.setItem('sw-reloaded', '1');
-            window.location.reload();
+      navigator.serviceWorker.getRegistrations().then(regs => {
+        regs.forEach(reg => {
+          // Unregister any sw.js (our custom one) — Flutter's flutter_service_worker.js
+          // is managed by flutter_bootstrap.js directly; we don't need sw.js at all.
+          if (reg.active && reg.active.scriptURL.includes('/sw.js')) {
+            reg.unregister().then(() => console.log('[RLA CRM] Unregistered old sw.js'));
           }
         });
       });

@@ -23,12 +23,39 @@ void main() async {
   );
 
   // Initialise Firebase before anything else
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+  } catch (e) {
+    // Firebase may already be initialized (hot restart), ignore duplicate-app error
+    if (!e.toString().contains('duplicate-app')) {
+      runApp(MaterialApp(
+        debugShowCheckedModeBanner: false,
+        home: Scaffold(
+          backgroundColor: const Color(0xFF7B5FFF),
+          body: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(32),
+              child: Text(
+                'Initialization error: $e',
+                style: const TextStyle(color: Colors.white, fontSize: 14),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ),
+        ),
+      ));
+      return;
+    }
+  }
 
   final appState = AppState();
-  await appState.init();
+  try {
+    await appState.init();
+  } catch (e) {
+    // If init fails, still show the app (it will handle state gracefully)
+  }
 
   runApp(
     ChangeNotifierProvider.value(
