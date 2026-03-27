@@ -384,12 +384,23 @@ class _AdminHome extends StatelessWidget {
   const _AdminHome();
 
   @override
+  String _fmtRev(double v) {
+    if (v >= 10000000) return '₹${(v / 10000000).toStringAsFixed(2)}Cr';
+    if (v >= 100000) return '₹${(v / 100000).toStringAsFixed(2)}L';
+    return '₹${v.toStringAsFixed(0)}';
+  }
+
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     final leads = state.companyLeads;
     final projects = state.companyProjects;
     final salesUsers = state.salesUsers;
     final byStatus = state.leadsByStatus;
+    // Revenue calculations
+    final closedLeads = leads.where((l) => l.status == LeadStatus.closed && l.closedValue != null).toList();
+    final totalRevenue = closedLeads.fold<double>(0, (sum, l) => sum + l.closedValue!);
+    final saleRevenue = closedLeads.where((l) => l.leadType == LeadType.sale).fold<double>(0, (sum, l) => sum + l.closedValue!);
+    final leaseRevenue = closedLeads.where((l) => l.leadType == LeadType.lease).fold<double>(0, (sum, l) => sum + l.closedValue!);
 
     return SafeArea(
       child: SingleChildScrollView(
@@ -441,6 +452,10 @@ class _AdminHome extends StatelessWidget {
                 ],
               );
             }),
+            const SizedBox(height: 16),
+
+            // ── Closed Revenue Banner ──────────────────────────────────────
+            _buildRevenueBanner(context, totalRevenue, saleRevenue, leaseRevenue, closedLeads.length),
             const SizedBox(height: 20),
 
             // Pipeline overview
@@ -473,6 +488,9 @@ class _AdminHome extends StatelessWidget {
                 children: salesUsers.map((u) {
                   final uLeads = leads.where((l) => l.assignedToId == u.id).length;
                   final uClosed = leads.where((l) => l.assignedToId == u.id && l.status == LeadStatus.closed).length;
+                  final uRevenue = leads
+                      .where((l) => l.assignedToId == u.id && l.status == LeadStatus.closed && l.closedValue != null)
+                      .fold<double>(0, (sum, l) => sum + l.closedValue!);
                   return Padding(
                     padding: const EdgeInsets.only(bottom: 10),
                     child: Row(
@@ -483,7 +501,13 @@ class _AdminHome extends StatelessWidget {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(u.name, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600)),
+                              Row(
+                                children: [
+                                  Expanded(child: Text(u.name, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600))),
+                                  if (uRevenue > 0)
+                                    Text(_fmtRev(uRevenue), style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w700, color: const Color(0xFF7C6FFF))),
+                                ],
+                              ),
                               const SizedBox(height: 2),
                               LinearProgressIndicator(
                                 value: uLeads > 0 ? uClosed / uLeads : 0,
@@ -504,6 +528,9 @@ class _AdminHome extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 20),
+
+            // Per-project revenue breakdown (if multi-project admin)
+            if (projects.length > 1) ..._buildProjectRevenueBreakdown(context, projects, leads),
 
             // Recent leads
             SectionHeader(title: 'Recent Leads'),
@@ -530,6 +557,185 @@ class _AdminHome extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Widget _buildRevenueBanner(BuildContext context, double totalRevenue, double saleRevenue, double leaseRevenue, int closedCount) {
+    if (totalRevenue == 0) {
+      return Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppColors.border.withValues(alpha: 0.3),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.currency_rupee_rounded, size: 16, color: AppColors.textMuted),
+            const SizedBox(width: 10),
+            Text('No closed deal revenue recorded yet', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted)),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [const Color(0xFF7C6FFF).withValues(alpha: 0.13), const Color(0xFFFF9F7C).withValues(alpha: 0.07)],
+        ),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFF7C6FFF).withValues(alpha: 0.3)),
+        boxShadow: [BoxShadow(color: const Color(0xFF7C6FFF).withValues(alpha: 0.07), blurRadius: 12, offset: const Offset(0, 3))],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(gradient: AppColors.gradientPrimary, borderRadius: BorderRadius.circular(10)),
+                child: const Icon(Icons.currency_rupee_rounded, size: 16, color: Colors.white),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Total Closed Revenue', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+                    Text(_fmtRev(totalRevenue), style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.w800, color: AppColors.textPrimary, height: 1.1)),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(color: AppColors.sky.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(8)),
+                child: Text('$closedCount deals', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.cyan)),
+              ),
+            ],
+          ),
+          if (saleRevenue > 0 || leaseRevenue > 0) ...[
+            const SizedBox(height: 12),
+            Container(height: 1, color: AppColors.border.withValues(alpha: 0.5)),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                if (saleRevenue > 0)
+                  Expanded(
+                    child: _revTypeChip('Sale Revenue', _fmtRev(saleRevenue), AppColors.lavender, Icons.home_outlined),
+                  ),
+                if (saleRevenue > 0 && leaseRevenue > 0) const SizedBox(width: 10),
+                if (leaseRevenue > 0)
+                  Expanded(
+                    child: _revTypeChip('Annual Lease', _fmtRev(leaseRevenue), AppColors.peach, Icons.vpn_key_outlined),
+                  ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _revTypeChip(String label, String value, Color color, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 13, color: color),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: GoogleFonts.inter(fontSize: 9, color: AppColors.textMuted)),
+                Text(value, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<Widget> _buildProjectRevenueBreakdown(BuildContext context, List<dynamic> projects, List<dynamic> leads) {
+    final projectRevenues = projects.map((p) {
+      final pLeads = leads.where((l) => l.projectId == p.id).toList();
+      final revenue = pLeads
+          .where((l) => l.status == LeadStatus.closed && l.closedValue != null)
+          .fold<double>(0, (sum, l) => sum + l.closedValue!);
+      final closed = pLeads.where((l) => l.status == LeadStatus.closed).length;
+      return {'project': p, 'revenue': revenue, 'closed': closed};
+    }).where((m) => (m['revenue'] as double) > 0).toList()
+      ..sort((a, b) => (b['revenue'] as double).compareTo(a['revenue'] as double));
+
+    if (projectRevenues.isEmpty) return [];
+
+    final totalRev = projectRevenues.fold<double>(0, (sum, m) => sum + (m['revenue'] as double));
+
+    return [
+      SectionHeader(title: 'Revenue by Project'),
+      const SizedBox(height: 10),
+      GlassCard(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        child: Column(
+          children: projectRevenues.map((m) {
+            final p = m['project'] as dynamic;
+            final revenue = m['revenue'] as double;
+            final closed = m['closed'] as int;
+            final pct = totalRev > 0 ? (revenue / totalRev).clamp(0.0, 1.0) : 0.0;
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 28, height: 28,
+                        decoration: BoxDecoration(gradient: AppColors.gradientPrimary, borderRadius: BorderRadius.circular(7)),
+                        child: Center(child: Text(
+                          p.name.isNotEmpty ? p.name[0].toUpperCase() : 'P',
+                          style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white),
+                        )),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(p.name, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary), overflow: TextOverflow.ellipsis),
+                      ),
+                      Text(_fmtRev(revenue), style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w800, color: const Color(0xFF7C6FFF))),
+                      const SizedBox(width: 6),
+                      Text('($closed)', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
+                    ],
+                  ),
+                  const SizedBox(height: 5),
+                  Stack(
+                    children: [
+                      Container(height: 5, decoration: BoxDecoration(color: AppColors.border, borderRadius: BorderRadius.circular(4))),
+                      FractionallySizedBox(
+                        widthFactor: pct,
+                        child: Container(height: 5, decoration: BoxDecoration(gradient: AppColors.gradientPrimary, borderRadius: BorderRadius.circular(4))),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text('${(pct * 100).toStringAsFixed(0)}% of project revenue · $closed deals', style: GoogleFonts.inter(fontSize: 9, color: AppColors.textMuted)),
+                ],
+              ),
+            );
+          }).toList(),
+        ),
+      ),
+      const SizedBox(height: 20),
+    ];
   }
 
   Widget _heroStat(String label, String value, LinearGradient grad) {
