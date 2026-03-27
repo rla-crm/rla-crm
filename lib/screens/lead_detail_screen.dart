@@ -336,19 +336,26 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> with TickerProvider
                         child: GestureDetector(
                           onTap: isClickable ? () {
                             final newStatus = stages[i];
-                            final activity = LeadActivity(
-                              leadId: _lead.id,
-                              userId: state.currentUser!.id,
-                              userName: state.currentUser!.name,
-                              action: 'Stage moved',
-                              note: 'Moved from ${_lead.status.label} to ${newStatus.label}',
-                              fromStatus: _lead.status,
-                              toStatus: newStatus,
-                            );
-                            _lead.activities.add(activity);
-                            _lead.status = newStatus;
-                            state.updateLead(_lead);
-                            setState(() {});
+                            void doMove() {
+                              final activity = LeadActivity(
+                                leadId: _lead.id,
+                                userId: state.currentUser!.id,
+                                userName: state.currentUser!.name,
+                                action: 'Stage moved',
+                                note: 'Moved from ${_lead.status.label} to ${newStatus.label}',
+                                fromStatus: _lead.status,
+                                toStatus: newStatus,
+                              );
+                              _lead.activities.add(activity);
+                              _lead.status = newStatus;
+                              state.updateLead(_lead);
+                              setState(() {});
+                            }
+                            if (newStatus == LeadStatus.closed) {
+                              _showClosedValueDialog(context, state, onConfirm: doMove);
+                            } else {
+                              doMove();
+                            }
                           } : null,
                           child: Column(
                             children: [
@@ -555,19 +562,26 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> with TickerProvider
                 return GestureDetector(
                   onTap: () {
                     if (isActive) return;
-                    final activity = LeadActivity(
-                      leadId: _lead.id,
-                      userId: state.currentUser!.id,
-                      userName: state.currentUser!.name,
-                      action: 'Stage moved',
-                      note: 'Moved from ${_lead.status.label} to ${s.label}',
-                      fromStatus: _lead.status,
-                      toStatus: s,
-                    );
-                    _lead.activities.add(activity);
-                    _lead.status = s;
-                    state.updateLead(_lead);
-                    setState(() {});
+                    void doStageMove() {
+                      final activity = LeadActivity(
+                        leadId: _lead.id,
+                        userId: state.currentUser!.id,
+                        userName: state.currentUser!.name,
+                        action: 'Stage moved',
+                        note: 'Moved from ${_lead.status.label} to ${s.label}',
+                        fromStatus: _lead.status,
+                        toStatus: s,
+                      );
+                      _lead.activities.add(activity);
+                      _lead.status = s;
+                      state.updateLead(_lead);
+                      setState(() {});
+                    }
+                    if (s == LeadStatus.closed) {
+                      _showClosedValueDialog(context, state, onConfirm: doStageMove);
+                    } else {
+                      doStageMove();
+                    }
                   },
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
@@ -735,6 +749,10 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> with TickerProvider
             Text('Lead Details', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary, letterSpacing: 0.5)),
             const SizedBox(height: 12),
             _detailRow('Source', _lead.source.label),
+            _detailRow('Lead Type', _lead.leadType.label),
+            if (_lead.status == LeadStatus.closed)
+              _detailRow(_lead.closedValueLabel, _lead.closedValueDisplay,
+                  highlight: _lead.closedValue != null),
             _detailRow('Assigned To', _lead.assignedToName),
             _detailRow('Created By', _lead.createdByName),
             _detailRow('Created', _formatDate(_lead.createdAt)),
@@ -757,18 +775,28 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> with TickerProvider
     );
   }
 
-  Widget _detailRow(String label, String value) {
+  Widget _detailRow(String label, String value, {bool highlight = false}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
-            width: 100,
+            width: 110,
             child: Text(label, style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted)),
           ),
           Expanded(
-            child: Text(value, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w500, color: AppColors.textPrimary)),
+            child: highlight
+                ? Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      gradient: AppColors.gradientCTA,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(value,
+                        style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                  )
+                : Text(value, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w500, color: AppColors.textPrimary)),
           ),
         ],
       ),
@@ -858,6 +886,160 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> with TickerProvider
   Color _darken(Color color) {
     final hsl = HSLColor.fromColor(color);
     return hsl.withLightness((hsl.lightness - 0.25).clamp(0.0, 1.0)).toColor();
+  }
+
+  // ── Closed-Value Prompt Dialog ─────────────────────────────────────────────
+  /// Shows a dialog asking for the deal value when a lead is moved to Closed.
+  /// Calls [onConfirm] with the (optional) entered value so the caller can
+  /// persist the status + closedValue together.
+  void _showClosedValueDialog(
+    BuildContext context,
+    AppState state, {
+    required VoidCallback onConfirm,
+  }) {
+    final isLease = _lead.leadType == LeadType.lease;
+    final valueLabel = isLease ? 'Annual Lease Amount (₹)' : 'Sale / Deal Value (₹)';
+    final valueHint  = isLease ? 'e.g. 1200000 for ₹12L/year' : 'e.g. 5000000 for ₹50L';
+    final ctrl = TextEditingController(
+      text: _lead.closedValue != null
+          ? _lead.closedValue!.toStringAsFixed(0)
+          : '',
+    );
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        backgroundColor: AppColors.background,
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header
+              Row(
+                children: [
+                  Container(
+                    width: 44, height: 44,
+                    decoration: BoxDecoration(
+                      gradient: AppColors.gradientCTA,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(Icons.monetization_on_rounded, size: 22, color: Colors.white),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Mark as Closed',
+                            style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                        Text(isLease ? 'Enter annual lease amount' : 'Enter the deal value',
+                            style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              // Lead summary row
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.lavender.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.lavender.withValues(alpha: 0.25)),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 36, height: 36,
+                      decoration: BoxDecoration(
+                        gradient: AppColors.gradientPrimary,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Center(child: Text(_lead.initials,
+                          style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white))),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(_lead.name, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary), maxLines: 1, overflow: TextOverflow.ellipsis),
+                          Text('${_lead.projectName} · ${isLease ? "Lease" : "Sale"}',
+                              style: GoogleFonts.inter(fontSize: 11, color: AppColors.textSecondary), maxLines: 1, overflow: TextOverflow.ellipsis),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              // Value field
+              Text(valueLabel,
+                  style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+              const SizedBox(height: 8),
+              TextField(
+                controller: ctrl,
+                keyboardType: const TextInputType.numberWithOptions(decimal: false),
+                autofocus: true,
+                decoration: InputDecoration(
+                  hintText: valueHint,
+                  prefixIcon: const Icon(Icons.currency_rupee_rounded, size: 18, color: AppColors.textMuted),
+                  suffixText: isLease ? '/year' : null,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text('You can leave this blank and update it later.',
+                  style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted, fontStyle: FontStyle.italic)),
+              const SizedBox(height: 20),
+              // Action buttons
+              Row(children: [
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => Navigator.pop(ctx),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 13),
+                      decoration: BoxDecoration(
+                        color: AppColors.surface,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: AppColors.border),
+                      ),
+                      child: Center(child: Text('Cancel',
+                          style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textSecondary))),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () {
+                      final val = double.tryParse(ctrl.text.trim());
+                      _lead.closedValue = val;
+                      Navigator.pop(ctx);
+                      onConfirm();
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 13),
+                      decoration: BoxDecoration(
+                        gradient: AppColors.gradientCTA,
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: [BoxShadow(color: AppColors.lavender.withValues(alpha: 0.35), blurRadius: 8, offset: const Offset(0, 3))],
+                      ),
+                      child: Center(child: Text('Confirm Closed',
+                          style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary))),
+                    ),
+                  ),
+                ),
+              ]),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _actionTile(IconData icon, String label, LinearGradient gradient, VoidCallback onTap, {Color? iconColor, Color? labelColor}) {

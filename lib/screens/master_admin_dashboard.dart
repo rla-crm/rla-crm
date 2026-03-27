@@ -1008,7 +1008,7 @@ class _MasterAnalyticsScreen extends StatelessWidget {
                   _kpiCard('Closures', totalClosures.toString(), Icons.check_circle_outline_rounded, AppColors.gradientSuccess),
                   _kpiCard('Conv. Rate', '${conversionRate.toStringAsFixed(1)}%', Icons.donut_large_rounded, AppColors.gradientCTA),
                   _kpiCard('Projects', state.projects.length.toString(), Icons.apartment_outlined, AppColors.gradientPrimary),
-                  _kpiCard('Users', state.totalAllUsers.toString(), Icons.people_outline_rounded, const LinearGradient(colors: [AppColors.sky, AppColors.teal])),
+                  _kpiCard('Users', state.totalAllUsers.toString(), Icons.people_outline_rounded, const LinearGradient(colors: [AppColors.sky, AppColors.cyan])),
                   if (totalRevenue > 0)
                     _kpiCard('Revenue', _fmtRev(totalRevenue), Icons.monetization_on_outlined, AppColors.gradientSuccess),
                 ],
@@ -1146,9 +1146,9 @@ class _MasterAnalyticsScreen extends StatelessWidget {
                             _divider(),
                             _statCol('New', '$newL', AppColors.lavender),
                             _divider(),
-                            _statCol('Site Visit', '$siteVisit', AppColors.teal),
+                            _statCol('Site Visit', '$siteVisit', AppColors.cyan),
                             _divider(),
-                            _statCol('Closed', '$closed', const Color(0xFF3B8A6E)),
+                            _statCol('Closed', '$closed', AppColors.cyan),
                             _divider(),
                             _statCol('Conv.', '${rate.toStringAsFixed(0)}%', const Color(0xFF5B3FBF)),
                             if ((data['revenue'] as double) > 0) ...[
@@ -1318,7 +1318,7 @@ class _AllUsersScreenState extends State<_AllUsersScreen> {
                                 Text(u.email, style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted)),
                                 if (u.companyName != null) Text(u.companyName!, style: GoogleFonts.inter(fontSize: 10, color: AppColors.lavender), maxLines: 1, overflow: TextOverflow.ellipsis),
                                 if (u.role != UserRole.masterAdmin && u.projectIds.length > 1)
-                                  Text('${u.projectIds.length} projects', style: GoogleFonts.inter(fontSize: 9, color: AppColors.teal, fontWeight: FontWeight.w600)),
+                                  Text('${u.projectIds.length} projects', style: GoogleFonts.inter(fontSize: 9, color: AppColors.cyan, fontWeight: FontWeight.w600)),
                               ],
                             ),
                           ),
@@ -1329,7 +1329,7 @@ class _AllUsersScreenState extends State<_AllUsersScreen> {
                               isSmall: true,
                             ),
                             const SizedBox(height: 4),
-                            StatusPill(label: u.isActive ? 'Active' : 'Inactive', color: u.isActive ? AppColors.mint : AppColors.stageLost, isSmall: true),
+                            StatusPill(label: u.isActive ? 'Active' : 'Inactive', color: u.isActive ? AppColors.sky : AppColors.stageLost, isSmall: true),
                           ]),
                         ],
                       ),
@@ -1341,7 +1341,7 @@ class _AllUsersScreenState extends State<_AllUsersScreen> {
                           const SizedBox(width: 6),
                           _userActionBtn(
                             u.isActive ? Icons.pause_circle_outline_rounded : Icons.play_circle_outline_rounded,
-                            u.isActive ? AppColors.peach : AppColors.mint,
+                            u.isActive ? AppColors.peach : AppColors.sky,
                             isSelf ? null : () => state.toggleUserActive(u.id),
                           ),
                           const SizedBox(width: 6),
@@ -1628,7 +1628,7 @@ class _EditUserSheetState extends State<_EditUserSheet> {
     Navigator.pop(context);
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text('${updated.name} updated successfully!', style: GoogleFonts.inter()),
-      backgroundColor: const Color(0xFF3B8A6E),
+      backgroundColor: AppColors.cyan,
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
     ));
@@ -1793,7 +1793,7 @@ class _AddProjectAdminSheetState extends State<_AddProjectAdminSheet> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Admin assigned to ${_selectedProjectIds.length} additional project(s)!', style: GoogleFonts.inter()),
-            backgroundColor: const Color(0xFF3B8A6E),
+            backgroundColor: AppColors.cyan,
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
@@ -2686,7 +2686,7 @@ class _MasterAlertSheetState extends State<_MasterAlertSheet> {
               final colors = {
                 NotificationPriority.high: AppColors.pink,
                 NotificationPriority.medium: AppColors.peach,
-                NotificationPriority.low: AppColors.mint
+                NotificationPriority.low: AppColors.sky
               };
               final c = colors[p]!;
               final sel = _priority == p;

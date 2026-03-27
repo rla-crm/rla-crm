@@ -208,7 +208,7 @@ class _UserCard extends StatelessWidget {
                         children: [
                           StatusPill(label: user.roleLabel, color: isAdmin ? AppColors.lavender : AppColors.sky, isSmall: true),
                           const SizedBox(width: 6),
-                          StatusPill(label: user.isActive ? 'Active' : 'Inactive', color: user.isActive ? AppColors.mint : AppColors.stageLost, isSmall: true),
+                          StatusPill(label: user.isActive ? 'Active' : 'Inactive', color: user.isActive ? AppColors.sky : AppColors.stageLost, isSmall: true),
                         ],
                       ),
                     ],
@@ -228,7 +228,7 @@ class _UserCard extends StatelessWidget {
                     _actionBtn(Icons.edit_outlined, AppColors.lavender, onEdit),
                     const SizedBox(width: 6),
                     _actionBtn(user.isActive ? Icons.pause_circle_outline_rounded : Icons.play_circle_outline_rounded,
-                        user.isActive ? AppColors.peach : AppColors.mint, onToggle),
+                        user.isActive ? AppColors.peach : AppColors.sky, onToggle),
                     const SizedBox(width: 6),
                     _actionBtn(Icons.delete_outline_rounded, AppColors.pink, onDelete),
                   ] else
@@ -402,7 +402,7 @@ class _UserSheetState extends State<_UserSheet> {
     if (widget.existing == null) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text('${user.name} added to ${_selectedProjectIds.length} project(s)!', style: GoogleFonts.inter(fontSize: 12)),
-        backgroundColor: const Color(0xFF3B8A6E),
+        backgroundColor: AppColors.cyan,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ));
@@ -556,7 +556,7 @@ class _SalesTeamView extends StatelessWidget {
                           children: [
                             _badge('${ myLeads.length} Leads', AppColors.sky),
                             const SizedBox(width: 6),
-                            _badge('$closed Closed', AppColors.mint),
+                            _badge('$closed Closed', AppColors.sky),
                             const SizedBox(width: 6),
                             _badge('$siteVisits Visits', AppColors.peach),
                           ],
@@ -594,7 +594,7 @@ class _SalesTeamView extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
                         Text('$mLeads leads', style: GoogleFonts.inter(fontSize: 11, color: AppColors.textSecondary)),
-                        Text('$mClosed closed', style: GoogleFonts.inter(fontSize: 10, color: AppColors.teal)),
+                        Text('$mClosed closed', style: GoogleFonts.inter(fontSize: 10, color: AppColors.cyan)),
                       ],
                     ),
                   ],

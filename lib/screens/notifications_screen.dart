@@ -38,7 +38,7 @@ class NotificationsScreen extends StatelessWidget {
                               fontSize: 12,
                               color: unread > 0
                                   ? AppColors.pink
-                                  : AppColors.mint)),
+                                  : AppColors.sky)),
                     ],
                   ),
                 ),
@@ -226,7 +226,7 @@ class _NotifCard extends StatelessWidget {
                               : notif.priority ==
                                       NotificationPriority.medium
                                   ? AppColors.sky
-                                  : AppColors.mint,
+                                  : AppColors.sky,
                           isSmall: true,
                         ),
                       ],
@@ -354,7 +354,7 @@ class _NewAlertSheetState extends State<_NewAlertSheet> {
                 final colors = {
                   NotificationPriority.high: AppColors.pink,
                   NotificationPriority.medium: AppColors.sky,
-                  NotificationPriority.low: AppColors.mint
+                  NotificationPriority.low: AppColors.sky
                 };
                 final c = colors[p]!;
                 final sel = _priority == p;

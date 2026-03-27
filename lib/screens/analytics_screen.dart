@@ -539,14 +539,14 @@ $lines
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: AppColors.mint.withValues(alpha: 0.15),
+                  color: AppColors.sky.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: AppColors.mint.withValues(alpha: 0.4)),
+                  border: Border.all(color: AppColors.sky.withValues(alpha: 0.4)),
                 ),
                 child: Row(children: [
-                  const Icon(Icons.check_circle_outline_rounded, size: 14, color: Color(0xFF3B8A6E)),
+                  const Icon(Icons.check_circle_outline_rounded, size: 14, color: AppColors.cyan),
                   const SizedBox(width: 8),
-                  Expanded(child: Text('Report generated successfully. In a production environment, this would download as a PDF or CSV file.', style: GoogleFonts.inter(fontSize: 11, color: const Color(0xFF3B8A6E)))),
+                  Expanded(child: Text('Report generated successfully. In a production environment, this would download as a PDF or CSV file.', style: GoogleFonts.inter(fontSize: 11, color: AppColors.cyan))),
                 ]),
               ),
             ],
@@ -566,7 +566,7 @@ $lines
                   const SizedBox(width: 8),
                   Text('${_reportTitle(type)} downloaded!', style: GoogleFonts.inter(fontSize: 12)),
                 ]),
-                backgroundColor: const Color(0xFF3B8A6E),
+                backgroundColor: AppColors.cyan,
                 behavior: SnackBarBehavior.floating,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ));

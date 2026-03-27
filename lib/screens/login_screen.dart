@@ -487,13 +487,13 @@ class _SalesTeamSignupSheetState extends State<_SalesTeamSignupSheet> {
       String msg; Color color;
       if (result.pendingApproval) {
         msg   = 'Request submitted! The Project Admin will review your signup request. You\'ll receive an email once approved.';
-        color = const Color(0xFF3B7A8A);
+        color = AppColors.cyan;
       } else if (result.promotedToAdmin) {
         msg   = 'Admin access granted! Your email matched the registered project admin email.';
         color = const Color(0xFF5B3FBF);
       } else {
         msg   = 'Account created! You can now sign in.';
-        color = const Color(0xFF3B8A6E);
+        color = AppColors.cyan;
       }
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(msg, style: GoogleFonts.inter(fontSize: 12)),
@@ -921,10 +921,10 @@ class _ForgotPasswordSheetState extends State<_ForgotPasswordSheet> {
           border: Border.all(color: AppColors.cyan.withValues(alpha: 0.4)),
         ),
         child: Row(children: [
-          const Icon(Icons.check_circle_outline_rounded, size: 16, color: Color(0xFF3B8A6E)),
+          const Icon(Icons.check_circle_outline_rounded, size: 16, color: AppColors.cyan),
           const SizedBox(width: 8),
           Text('OTP verified successfully!',
-              style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: const Color(0xFF3B8A6E))),
+              style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.cyan)),
         ]),
       ),
       const SizedBox(height: 16),

@@ -488,7 +488,7 @@ class _AdminHome extends StatelessWidget {
                               LinearProgressIndicator(
                                 value: uLeads > 0 ? uClosed / uLeads : 0,
                                 backgroundColor: AppColors.border,
-                                valueColor: const AlwaysStoppedAnimation(AppColors.teal),
+                                valueColor: const AlwaysStoppedAnimation(AppColors.cyan),
                                 borderRadius: BorderRadius.circular(4),
                                 minHeight: 4,
                               ),

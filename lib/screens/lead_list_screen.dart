@@ -832,16 +832,18 @@ class _RevenueCard extends StatelessWidget {
               sub: '$saleCount deal${saleCount == 1 ? "" : "s"}',
               color: LeadType.sale.color,
               icon: Icons.sell_rounded,
+              sublabel: null,
             ),
           ),
           const SizedBox(width: 10),
           Expanded(
             child: _MiniStat(
-              label: 'Lease Revenue',
+              label: 'Annual Lease',
               value: leaseRevenue > 0 ? fmt(leaseRevenue) : '—',
               sub: '$leaseCount deal${leaseCount == 1 ? "" : "s"}',
               color: LeadType.lease.color,
               icon: Icons.key_rounded,
+              sublabel: leaseRevenue > 0 ? 'per year' : null,
             ),
           ),
         ]),
@@ -852,6 +854,7 @@ class _RevenueCard extends StatelessWidget {
 
 class _MiniStat extends StatelessWidget {
   final String label, value, sub;
+  final String? sublabel;
   final Color color;
   final IconData icon;
   const _MiniStat(
@@ -859,7 +862,8 @@ class _MiniStat extends StatelessWidget {
       required this.value,
       required this.sub,
       required this.color,
-      required this.icon});
+      required this.icon,
+      this.sublabel});
 
   @override
   Widget build(BuildContext context) {
@@ -879,11 +883,26 @@ class _MiniStat extends StatelessWidget {
             Text(label,
                 style: GoogleFonts.inter(
                     fontSize: 10, color: AppColors.textMuted)),
-            Text(value,
-                style: GoogleFonts.inter(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textPrimary)),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(value,
+                    style: GoogleFonts.inter(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary)),
+                if (sublabel != null) ...[
+                  const SizedBox(width: 3),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 1),
+                    child: Text(sublabel!,
+                        style: GoogleFonts.inter(
+                            fontSize: 8,
+                            color: AppColors.orange)),
+                  ),
+                ],
+              ],
+            ),
             Text(sub,
                 style: GoogleFonts.inter(
                     fontSize: 10, color: AppColors.textMuted)),
@@ -964,14 +983,25 @@ class _ClosedLeadCard extends StatelessWidget {
                     gradient: AppColors.gradientSuccess,
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Text(
-                    lead.closedValue != null
-                        ? _fmt(lead.closedValue!)
-                        : 'No value',
-                    style: GoogleFonts.inter(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        lead.closedValue != null
+                            ? lead.closedValueDisplay
+                            : 'No value',
+                        style: GoogleFonts.inter(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white),
+                      ),
+                      if (lead.leadType == LeadType.lease)
+                        Text('annual',
+                            style: GoogleFonts.inter(
+                                fontSize: 8,
+                                color: Colors.white70)),
+                    ],
                   ),
                 ),
               ],

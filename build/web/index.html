@@ -159,42 +159,18 @@
     <button id="pwa-dismiss-btn">✕</button>
   </div>
 
-
-  <script>
-    // Force clear all service workers and caches on every load
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.getRegistrations().then(regs => {
-        regs.forEach(reg => {
-          console.log('[Cache Bust] Unregistering SW:', reg.scope);
-          reg.unregister();
-        });
-      });
-      // Clear all caches
-      if ('caches' in window) {
-        caches.keys().then(keys => {
-          keys.forEach(key => {
-            console.log('[Cache Bust] Deleting cache:', key);
-            caches.delete(key);
-          });
-        });
-      }
-    }
-  </script>
   <!-- Flutter app -->
   <script src="flutter_bootstrap.js" async></script>
 
   <script>
-    // ── Unregister ALL old service workers so stale caches don't block load ──
+    // ── Unregister ALL service workers + clear ALL caches on every load ──
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.getRegistrations().then(regs => {
-        regs.forEach(reg => {
-          // Unregister any sw.js (our custom one) — Flutter's flutter_service_worker.js
-          // is managed by flutter_bootstrap.js directly; we don't need sw.js at all.
-          if (reg.active && reg.active.scriptURL.includes('/sw.js')) {
-            reg.unregister().then(() => console.log('[RLA CRM] Unregistered old sw.js'));
-          }
-        });
+        regs.forEach(reg => reg.unregister());
       });
+    }
+    if ('caches' in window) {
+      caches.keys().then(keys => keys.forEach(key => caches.delete(key)));
     }
 
     // ── PWA Install prompt (Android Chrome / Edge) ───────────

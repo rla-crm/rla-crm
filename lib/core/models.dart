@@ -24,13 +24,13 @@ extension LeadTypeExt on LeadType {
   String get label {
     switch (this) {
       case LeadType.sale:  return 'Sale';
-      case LeadType.lease: return 'Lease / Rental';
+      case LeadType.lease: return 'Annual Lease';
     }
   }
   String get shortLabel {
     switch (this) {
       case LeadType.sale:  return 'Sale';
-      case LeadType.lease: return 'Lease';
+      case LeadType.lease: return 'Annual Lease';
     }
   }
   Color get color {
@@ -597,11 +597,17 @@ class Lead {
     return name.isNotEmpty ? name[0].toUpperCase() : '?';
   }
 
-  /// Display string for the closed deal value
+  /// Display string for the closed deal value.
+  /// For lease leads, appends "/yr" to clarify it is an annual figure.
   String get closedValueDisplay {
     if (closedValue == null) return 'Value N/A';
-    return _fmt(closedValue!);
+    final base = _fmt(closedValue!);
+    return leadType == LeadType.lease ? '$base/yr' : base;
   }
+
+  /// Short label used in column/card headers ("Deal Value" vs "Annual Lease")
+  String get closedValueLabel =>
+      leadType == LeadType.lease ? 'Annual Lease' : 'Deal Value';
 
   String get budgetDisplay {
     if (budgetMin == null && budgetMax == null) return 'Budget N/A';

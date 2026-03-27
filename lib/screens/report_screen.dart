@@ -2132,7 +2132,7 @@ class _MasterAdminReportScreenState extends State<MasterAdminReportScreen> {
                     AppColors.peach),
                 const SizedBox(width: 6),
                 _statPill('Closed', '$closedLeads',
-                    AppColors.mint),
+                    AppColors.sky),
                 const SizedBox(width: 6),
                 _statPill('Team', '$salesTeam',
                     AppColors.pink),
