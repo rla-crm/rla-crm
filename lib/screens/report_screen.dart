@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'dart:html' as html show AnchorElement, Url, Blob;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:google_fonts/google_fonts.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -75,7 +76,23 @@ Future<Uint8List> buildReportPdf({
   required List<LeadActivity> activities,
   bool isMasterAdmin = false,
 }) async {
-  final pdf = pw.Document();
+  // ── Load NotoSans fonts (bundled in assets — supports ₹ U+20B9) ──────────
+  final fontRegular = pw.Font.ttf(
+      (await rootBundle.load('assets/fonts/NotoSans-Regular.ttf'))
+          .buffer
+          .asByteData());
+  final fontBold = pw.Font.ttf(
+      (await rootBundle.load('assets/fonts/NotoSans-Bold.ttf'))
+          .buffer
+          .asByteData());
+  final pdf = pw.Document(
+    theme: pw.ThemeData.withFont(
+      base: fontRegular,
+      bold: fontBold,
+      italic: fontRegular,   // NotoSans has no italic; use regular as fallback
+      boldItalic: fontBold,
+    ),
+  );
   final now = DateTime.now();
   final dateStr =
       '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year}';
@@ -117,12 +134,14 @@ Future<Uint8List> buildReportPdf({
       return rc != 0 ? rc : b.closed.compareTo(a.closed);
     });
 
-  // ── PDF revenue formatter ──
+  // ── PDF revenue formatter — uses ₹ (U+20B9), rendered by NotoSans ──
   String fmtRev(double v) {
-    if (v >= 10000000) return '\u20b9${(v / 10000000).toStringAsFixed(2)} Cr';
-    if (v >= 100000)   return '\u20b9${(v / 100000).toStringAsFixed(2)} L';
-    return '\u20b9${v.toStringAsFixed(0)}';
+    if (v >= 10000000) return '\u20b9 ${(v / 10000000).toStringAsFixed(2)} Cr';
+    if (v >= 100000)   return '\u20b9 ${(v / 100000).toStringAsFixed(2)} L';
+    return '\u20b9 ${v.toStringAsFixed(0)}';
   }
+
+
 
   // ── Helpers ──
   pw.Widget _pdfSectionTitle(String t) => pw.Padding(
