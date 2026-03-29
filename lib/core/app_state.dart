@@ -5,6 +5,7 @@ import 'package:flutter/widgets.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'models.dart';
+import 'email_service.dart';
 import '../services/sync_service.dart';
 
 // ─── Signup Result ────────────────────────────────────────────────────────────
@@ -362,25 +363,14 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   String generatePasswordResetOtp(String email) {
     final otp = (100000 + DateTime.now().millisecondsSinceEpoch % 900000).toString();
     _otpStore[email.toLowerCase()] = _OtpEntry(otp, DateTime.now().add(const Duration(minutes: 10)));
+    final otpName = email.split('@').first;
     _sendEmail(
       toEmail: email,
-      toName: email.split('@').first,
-      subject: '🔐 Your RLA CRM Password Reset OTP',
-      body: '''
-Hello,
-
-Your one-time password (OTP) for resetting your RLA CRM account password is:
-
-  $otp
-
-This OTP is valid for 10 minutes. Do not share it with anyone.
-
-If you did not request this, please ignore this email.
-
-Best regards,
-RLA CRM Platform
-      ''',
+      toName: otpName,
+      subject: 'Your RLA CRM Password Reset OTP',
+      body: 'Your OTP is \$otp. Valid for 10 minutes.',
       triggerEvent: 'password_reset_otp',
+      htmlContent: EmailService.otpEmail(name: otpName, otp: otp),
     );
     if (kDebugMode) debugPrint('🔐 OTP for $email: $otp');
     return otp;
@@ -857,14 +847,16 @@ RLA CRM Platform
     _emailLogsBox.put(e.id, jsonEncode(e.toMap()));
   }
 
-  // ─── Email Simulation ─────────────────────────────────────────────────────
+  // ─── Email — logs locally AND sends via EmailJS ────────────────────────────
   void _sendEmail({
     required String toEmail,
     required String toName,
     required String subject,
-    required String body,
+    required String body,       // plain-text body for the log
     required String triggerEvent,
+    String? htmlContent,        // optional rich HTML (from EmailService templates)
   }) {
+    // 1. Always persist to local log
     final log = EmailLog(
       toEmail: toEmail,
       toName: toName,
@@ -873,9 +865,28 @@ RLA CRM Platform
       triggerEvent: triggerEvent,
     );
     _saveEmailLog(log);
-    if (kDebugMode) {
-      debugPrint('📧 [EMAIL SIMULATED] To: $toEmail | Subject: $subject');
-    }
+
+    // 2. Attempt real delivery in the background
+    final html = htmlContent ?? _plainToHtml(body);
+    unawaited(EmailService.send(
+      toEmail: toEmail,
+      toName: toName,
+      subject: subject,
+      htmlContent: html,
+    ));
+  }
+
+  /// Convert a plain-text email body to simple HTML (fallback when no template provided).
+  String _plainToHtml(String text) {
+    final escaped = text
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('\n', '<br>');
+    return '''<!DOCTYPE html><html><body style="font-family:Inter,sans-serif;color:#1A1A2E;padding:24px;max-width:520px;">
+<p>$escaped</p>
+<p style="margin-top:24px;font-size:11px;color:#aaa;">— RLA CRM Platform</p>
+</body></html>''';
   }
 
   // ─── Authentication ── CLOUD ONLY ─────────────────────────────────────────
@@ -1031,40 +1042,20 @@ RLA CRM Platform
       _sendEmail(
         toEmail: ca.email,
         toName: ca.name,
-        subject: '👤 New Sales Team Signup: $name',
-        body: '''
-Hello ${ca.name},
-
-A new sales team member has requested to join $projectName on RLA CRM.
-
-Name: $name
-Email: $email
-Requested Role: Sales Team
-
-Please log in to RLA CRM → Team → Pending Approvals to review this request.
-
-Best regards,
-RLA CRM Platform
-        ''',
+        subject: 'New Sales Team Signup Request – $projectName',
+        body: 'New signup: $name ($email) wants to join $projectName.',
         triggerEvent: 'employee_signup_submitted',
+        htmlContent: EmailService.adminNewSignupEmail(adminName: ca.name, applicantName: name, applicantEmail: email, projectName: projectName),
       );
     }
 
     _sendEmail(
       toEmail: email,
       toName: name,
-      subject: '✅ Signup Request Received – $projectName',
-      body: '''
-Hello $name,
-
-Your request to join $projectName on RLA CRM has been received and is awaiting approval from the project admin.
-
-You will be notified by email once your account is approved.
-
-Best regards,
-RLA CRM Platform
-      ''',
+      subject: 'Signup Request Received – $projectName',
+      body: 'Your signup request for $projectName has been received and is pending approval.',
       triggerEvent: 'employee_signup_applicant_confirmation',
+      htmlContent: EmailService.signupRequestEmail(name: name, projectName: projectName),
     );
 
     return const SignupResult(pendingApproval: true);
@@ -1141,21 +1132,16 @@ RLA CRM Platform
       _sendEmail(
         toEmail: req.applicantEmail,
         toName: req.applicantName,
-        subject: '🎉 Welcome to $entityName – RLA CRM',
-        body: '''
-Hello ${req.applicantName},
-
-Your account has been approved! You can now log in to RLA CRM.
-
-Email: ${req.applicantEmail}
-Password: ${req.password ?? 'changeme123'}
-Role: ${role == UserRole.companyAdmin ? 'Project Admin' : 'Sales Team'}
-Project: $entityName
-
-Best regards,
-RLA CRM Platform
-        ''',
+        subject: 'Welcome to $entityName – RLA CRM',
+        body: 'Your account is approved. Email: ${req.applicantEmail}, Password: ${req.password ?? "changeme123"}',
         triggerEvent: 'employee_signup_approved',
+        htmlContent: EmailService.welcomeEmail(
+          name: req.applicantName,
+          email: req.applicantEmail,
+          password: req.password ?? 'changeme123',
+          role: role == UserRole.companyAdmin ? 'Project Admin' : 'Sales Team',
+          projectName: entityName,
+        ),
       );
     } catch (_) {}
   }
@@ -1175,18 +1161,10 @@ RLA CRM Platform
       _sendEmail(
         toEmail: req.applicantEmail,
         toName: req.applicantName,
-        subject: '❌ Signup Request Update – RLA CRM',
-        body: '''
-Hello ${req.applicantName},
-
-Your request to join "${req.companyName}" has not been approved at this time.
-
-${note != null ? 'Reason: $note\n\n' : ''}Please contact the project admin for more information.
-
-Best regards,
-RLA CRM Platform
-        ''',
+        subject: 'Signup Request Update – RLA CRM',
+        body: 'Your signup request for ${req.companyName} was not approved.',
         triggerEvent: 'employee_signup_rejected',
+        htmlContent: EmailService.signupRejectedEmail(name: req.applicantName, projectName: req.companyName ?? 'the project', reason: note),
       );
     } catch (_) {}
   }
@@ -1274,22 +1252,14 @@ RLA CRM Platform
     _sendEmail(
       toEmail: email,
       toName: name,
-      subject: '🎉 Project Admin Access Granted – RLA CRM',
-      body: '''
-Hello $name,
-
-You have been added as a Project Admin for "${projects.map((p) => p.name).join(', ')}" on RLA CRM by ${_currentUser?.name ?? 'Master Admin'}.
-
-Login credentials:
-Email: $email
-Password: $password
-
-Please log in and change your password.
-
-Best regards,
-RLA CRM Platform
-      ''',
+      subject: 'Project Admin Access Granted – RLA CRM',
+      body: 'You are now a Project Admin. Email: $email, Password: $password',
       triggerEvent: 'project_admin_created',
+      htmlContent: EmailService.welcomeEmail(
+        name: name, email: email, password: password,
+        role: 'Project Admin',
+        projectName: projects.map((p) => p.name).join(', '),
+      ),
     );
     return null;
   }
@@ -1440,21 +1410,15 @@ RLA CRM Platform
       toEmail: email,
       toName: name,
       subject: '🔑 Master Admin Access Granted – RLA CRM',
-      body: '''
-Hello $name,
-
-You have been granted Master Admin access to RLA CRM by ${_currentUser?.name}.
-
-Login credentials:
-Email: $email
-Password: $password
-
-Please log in and change your password.
-
-Best regards,
-RLA CRM Platform
-      ''',
+      body: 'Hello $name, you have been granted Master Admin access. Email: $email | Password: $password. Please log in and change your password.',
       triggerEvent: 'master_admin_created',
+      htmlContent: EmailService.welcomeEmail(
+        name: name,
+        email: email,
+        password: password,
+        role: 'Master Admin',
+        projectName: 'All Projects',
+      ),
     );
 
     return null;
@@ -1465,7 +1429,38 @@ RLA CRM Platform
 
   // ─── CRUD: Projects ───────────────────────────────────────────────────────
   void addProject(RealEstateProject p) { _saveProject(p); }
-  void updateProject(RealEstateProject p) { p.updatedAt = DateTime.now(); _saveProject(p); }
+  void updateProject(RealEstateProject p) {
+    p.updatedAt = DateTime.now();
+    _saveProject(p);
+    // Notify sales team members of the project update
+    _notifyProjectUpdated(p);
+  }
+
+  /// Notify all sales team members of a project update.
+  void _notifyProjectUpdated(RealEstateProject p) {
+    final teamMembers = _users.where((u) =>
+        u.role == UserRole.sales &&
+        u.isApproved &&
+        (u.projectIds.contains(p.id) || u.companyId == p.id)).toList();
+
+    for (final member in teamMembers) {
+      if (member.email.isEmpty) continue;
+      _sendEmail(
+        toEmail: member.email,
+        toName: member.name,
+        subject: '🏢 Project Update – ${p.name}',
+        body: 'Hi ${member.name}, your project "${p.name}" has been updated by ${_currentUser?.name ?? 'Admin'}.',
+        triggerEvent: 'project_updated',
+        htmlContent: EmailService.projectUpdateToTeamEmail(
+          memberName: member.name,
+          projectName: p.name,
+          updateType: 'Project details updated',
+          updatedBy: _currentUser?.name ?? 'Admin',
+          details: p.status.label,
+        ),
+      );
+    }
+  }
   void deleteProject(String id) {
     _projects = _projects.where((p) => p.id != id).toList();
     notifyListeners();
@@ -1541,8 +1536,114 @@ RLA CRM Platform
   }
 
   // ─── CRUD: Leads ──────────────────────────────────────────────────────────
-  void addLead(Lead l) { _saveLead(l); }
-  void updateLead(Lead l) { l.updatedAt = DateTime.now(); _saveLead(l); }
+  void addLead(Lead l) {
+    _saveLead(l);
+    // Notify the assigned sales agent about the new lead
+    _notifyLeadAssigned(l);
+  }
+
+  void updateLead(Lead l) {
+    final previous = _leads.where((x) => x.id == l.id).isNotEmpty
+        ? _leads.firstWhere((x) => x.id == l.id)
+        : null;
+    l.updatedAt = DateTime.now();
+    _saveLead(l);
+    // Email triggers on meaningful status changes
+    _notifyLeadUpdated(l, previous);
+  }
+
+  /// Notify assigned sales agent when a new lead is assigned to them.
+  void _notifyLeadAssigned(Lead l) {
+    if (l.assignedToId.isEmpty) return;
+    AppUser? agent;
+    try { agent = _users.firstWhere((u) => u.id == l.assignedToId); } catch (_) {}
+    if (agent == null || agent.email.isEmpty) return;
+
+    _sendEmail(
+      toEmail: agent.email,
+      toName: agent.name,
+      subject: '📋 New Lead Assigned – ${l.projectName}',
+      body: 'Hi ${agent.name}, a new lead "${l.name}" has been assigned to you in ${l.projectName}.',
+      triggerEvent: 'lead_assigned',
+      htmlContent: EmailService.leadAssignedEmail(
+        agentName: agent.name,
+        leadName: l.name,
+        leadPhone: l.phone,
+        projectName: l.projectName,
+        assignedBy: _currentUser?.name ?? 'Admin',
+        notes: l.notes,
+      ),
+    );
+  }
+
+  /// Send emails on lead status changes (closed → admin/team, other → admin update).
+  void _notifyLeadUpdated(Lead l, Lead? previous) {
+    // Only trigger if status has actually changed
+    if (previous != null && previous.status == l.status &&
+        previous.assignedToId == l.assignedToId) return;
+
+    final projectAdmins = _users.where((u) =>
+        u.role == UserRole.companyAdmin &&
+        u.isApproved &&
+        (u.projectIds.contains(l.projectId) || u.companyId == l.projectId)).toList();
+
+    // If assignment changed, notify new agent
+    if (previous != null && previous.assignedToId != l.assignedToId) {
+      _notifyLeadAssigned(l);
+    }
+
+    // If status changed to Closed, notify all project admins
+    if (l.status == LeadStatus.closed &&
+        (previous == null || previous.status != LeadStatus.closed)) {
+      final dealValue = l.closedValue != null ? '₹${_fmtRevPlain(l.closedValue!)}' : null;
+      for (final admin in projectAdmins) {
+        if (admin.email.isEmpty) continue;
+        _sendEmail(
+          toEmail: admin.email,
+          toName: admin.name,
+          subject: '🎉 Deal Closed – ${l.projectName}',
+          body: 'Hi ${admin.name}, a deal has been closed for "${l.name}" in ${l.projectName}. '
+              '${dealValue != null ? 'Deal value: $dealValue.' : ''}',
+          triggerEvent: 'lead_closed',
+          htmlContent: EmailService.leadClosedEmail(
+            adminName: admin.name,
+            agentName: l.assignedToName,
+            leadName: l.name,
+            projectName: l.projectName,
+            dealValue: dealValue,
+          ),
+        );
+      }
+    } else if (previous != null && previous.status != l.status) {
+      // Status changed to something else — notify admins of the update
+      final action = 'Status changed from ${previous.status.label} to ${l.status.label}';
+      for (final admin in projectAdmins) {
+        if (admin.email.isEmpty) continue;
+        _sendEmail(
+          toEmail: admin.email,
+          toName: admin.name,
+          subject: '📋 Lead Updated – ${l.projectName}',
+          body: 'Hi ${admin.name}, lead "${l.name}" was updated in ${l.projectName}. $action.',
+          triggerEvent: 'lead_status_update',
+          htmlContent: EmailService.leadUpdateToAdminEmail(
+            adminName: admin.name,
+            agentName: l.assignedToName,
+            leadName: l.name,
+            action: action,
+            projectName: l.projectName,
+            note: l.notes,
+          ),
+        );
+      }
+    }
+  }
+
+  /// Plain number formatter for email text (no Flutter widgets).
+  String _fmtRevPlain(double v) {
+    if (v >= 1e7) return '${(v / 1e7).toStringAsFixed(2)} Cr';
+    if (v >= 1e5) return '${(v / 1e5).toStringAsFixed(2)} L';
+    return v.toStringAsFixed(0);
+  }
   void deleteLead(String id) {
     _leads = _leads.where((l) => l.id != id).toList();
     notifyListeners();

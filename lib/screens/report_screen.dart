@@ -59,6 +59,13 @@ enum ReportTimeline {
   }
 }
 
+// ─── Shared Revenue Formatter (used by all report screens) ───────────────────
+String _fmtRevReport(double v) {
+  if (v >= 10000000) return '\u20b9${(v / 10000000).toStringAsFixed(2)}Cr';
+  if (v >= 100000)   return '\u20b9${(v / 100000).toStringAsFixed(2)}L';
+  return '\u20b9${v.toStringAsFixed(0)}';
+}
+
 // ─── Shared PDF Builder ───────────────────────────────────────────────────────
 Future<Uint8List> buildReportPdf({
   required RealEstateProject project,
@@ -666,13 +673,41 @@ class _ReportPreviewSheetState extends State<ReportPreviewSheet> {
     final salesTeam = widget.salesTeam;
     final activities = widget.activities;
 
-    final closedLeads = leads.where((l) => l.status == LeadStatus.closed).length;
+    final closedLeadsList = leads.where((l) => l.status == LeadStatus.closed).toList();
+    final closedLeads = closedLeadsList.length;
     final siteVisits =
         leads.where((l) => l.status == LeadStatus.siteVisit).length;
     final newLeads =
         leads.where((l) => l.status == LeadStatus.newLead).length;
     final convRate =
         leads.isEmpty ? 0.0 : (closedLeads / leads.length) * 100;
+
+    // Revenue calculations
+    final totalRevenue = closedLeadsList
+        .where((l) => l.closedValue != null)
+        .fold<double>(0, (sum, l) => sum + l.closedValue!);
+    final saleRevenue = closedLeadsList
+        .where((l) => l.closedValue != null && l.leadType == LeadType.sale)
+        .fold<double>(0, (sum, l) => sum + l.closedValue!);
+    final leaseRevenue = closedLeadsList
+        .where((l) => l.closedValue != null && l.leadType == LeadType.lease)
+        .fold<double>(0, (sum, l) => sum + l.closedValue!);
+
+    // Star performers: sales team sorted by revenue then by closed count
+    final teamPerformance = salesTeam.map((u) {
+      final uLeads = leads.where((l) => l.assignedToId == u.id).length;
+      final uClosed = leads.where((l) => l.assignedToId == u.id && l.status == LeadStatus.closed).length;
+      final uRevenue = leads
+          .where((l) => l.assignedToId == u.id && l.status == LeadStatus.closed && l.closedValue != null)
+          .fold<double>(0, (sum, l) => sum + l.closedValue!);
+      final uVisits = leads.where((l) => l.assignedToId == u.id && l.status == LeadStatus.siteVisit).length;
+      return {'user': u, 'leads': uLeads, 'closed': uClosed, 'revenue': uRevenue, 'visits': uVisits};
+    }).toList()
+      ..sort((a, b) {
+        final revCmp = (b['revenue'] as double).compareTo(a['revenue'] as double);
+        if (revCmp != 0) return revCmp;
+        return (b['closed'] as int).compareTo(a['closed'] as int);
+      });
 
     final now = DateTime.now();
     final dateStr =
@@ -961,76 +996,212 @@ class _ReportPreviewSheetState extends State<ReportPreviewSheet> {
                     ),
                     const SizedBox(height: 16),
 
-                    // Sales Team
+                    // ── Closed Revenue Section ──────────────────────
+                    if (totalRevenue > 0) ...[
+                      _sectionTitle('Closed Deal Revenue'),
+                      const SizedBox(height: 10),
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              const Color(0xFF7C6FFF).withValues(alpha: 0.12),
+                              const Color(0xFFFF9F7C).withValues(alpha: 0.07),
+                            ],
+                          ),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFF7C6FFF).withValues(alpha: 0.3)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(7),
+                                  decoration: BoxDecoration(
+                                    gradient: AppColors.gradientPrimary,
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: const Icon(Icons.currency_rupee_rounded, size: 14, color: Colors.white),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text('Total Closed Revenue', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
+                                      Text(_fmtRevReport(totalRevenue), style: GoogleFonts.inter(fontSize: 22, fontWeight: FontWeight.w800, color: AppColors.textPrimary, height: 1.1)),
+                                    ],
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.sky.withValues(alpha: 0.2),
+                                    borderRadius: BorderRadius.circular(7),
+                                  ),
+                                  child: Text('$closedLeads deals', style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w700, color: AppColors.cyan)),
+                                ),
+                              ],
+                            ),
+                            if (saleRevenue > 0 || leaseRevenue > 0) ...[
+                              const SizedBox(height: 12),
+                              Container(height: 1, color: AppColors.border.withValues(alpha: 0.4)),
+                              const SizedBox(height: 12),
+                              Row(
+                                children: [
+                                  if (saleRevenue > 0)
+                                    Expanded(child: _revChip('Sale Revenue', _fmtRevReport(saleRevenue), AppColors.lavender, Icons.home_outlined)),
+                                  if (saleRevenue > 0 && leaseRevenue > 0) const SizedBox(width: 10),
+                                  if (leaseRevenue > 0)
+                                    Expanded(child: _revChip('Annual Lease', _fmtRevReport(leaseRevenue), AppColors.peach, Icons.vpn_key_outlined)),
+                                ],
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+
+                    // ── Star Performers ────────────────────────────
+                    if (teamPerformance.isNotEmpty && teamPerformance.any((m) => (m['closed'] as int) > 0)) ...[
+                      _sectionTitle('⭐ Star Performers'),
+                      const SizedBox(height: 10),
+                      ...teamPerformance.asMap().entries.where((e) => (e.value['closed'] as int) > 0).map((entry) {
+                        final rank = entry.key + 1;
+                        final m = entry.value;
+                        final u = m['user'] as AppUser;
+                        final uLeads = m['leads'] as int;
+                        final uClosed = m['closed'] as int;
+                        final uRevenue = m['revenue'] as double;
+                        final uVisits = m['visits'] as int;
+                        final uConv = uLeads == 0 ? '0%' : '${(uClosed / uLeads * 100).toStringAsFixed(0)}%';
+                        final isTopPerformer = rank == 1;
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: isTopPerformer
+                                ? const Color(0xFFFFF8E6)
+                                : AppColors.background,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: isTopPerformer
+                                  ? const Color(0xFFFFD700).withValues(alpha: 0.6)
+                                  : AppColors.border,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              // Rank badge
+                              Container(
+                                width: 28,
+                                height: 28,
+                                decoration: BoxDecoration(
+                                  gradient: isTopPerformer
+                                      ? const LinearGradient(colors: [Color(0xFFFFD700), Color(0xFFFFA500)])
+                                      : rank == 2
+                                          ? const LinearGradient(colors: [Color(0xFFC0C0C0), Color(0xFF909090)])
+                                          : rank == 3
+                                              ? const LinearGradient(colors: [Color(0xFFCD7F32), Color(0xFF8B4513)])
+                                              : AppColors.gradientTertiary,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Center(
+                                  child: Text(
+                                    rank <= 3 ? ['🥇', '🥈', '🥉'][rank - 1] : '#$rank',
+                                    style: GoogleFonts.inter(fontSize: rank <= 3 ? 13 : 10, fontWeight: FontWeight.w800, color: Colors.white),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              AvatarWidget(
+                                initials: u.initials,
+                                size: 32,
+                                gradient: isTopPerformer
+                                    ? const LinearGradient(colors: [Color(0xFFFFD700), Color(0xFFFFA500)])
+                                    : AppColors.gradientTertiary,
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Expanded(child: Text(u.name, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary))),
+                                        if (isTopPerformer)
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFFFFD700).withValues(alpha: 0.2),
+                                              borderRadius: BorderRadius.circular(5),
+                                              border: Border.all(color: const Color(0xFFFFD700).withValues(alpha: 0.5)),
+                                            ),
+                                            child: Text('Top Performer', style: GoogleFonts.inter(fontSize: 8, fontWeight: FontWeight.w700, color: const Color(0xFFB8860B))),
+                                          ),
+                                      ],
+                                    ),
+                                    Text('$uLeads leads · $uClosed closed · $uVisits visits · $uConv conv.',
+                                        style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
+                                    if (uRevenue > 0)
+                                      Text(_fmtRevReport(uRevenue), style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w800, color: const Color(0xFF7C6FFF))),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
+                      const SizedBox(height: 16),
+                    ],
+
+                    // ── Sales Team Performance (all members) ───────
                     _sectionTitle('Sales Team Performance'),
                     const SizedBox(height: 10),
-                    if (salesTeam.isEmpty)
+                    if (teamPerformance.isEmpty)
                       Text('No sales team assigned.',
-                          style: GoogleFonts.inter(
-                              fontSize: 12, color: AppColors.textMuted))
+                          style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted))
                     else
-                      ...salesTeam.map((u) {
-                        final uLeads = leads
-                            .where((l) => l.assignedToId == u.id)
-                            .length;
-                        final uClosed = leads
-                            .where((l) =>
-                                l.assignedToId == u.id &&
-                                l.status == LeadStatus.closed)
-                            .length;
-                        final uVisits = leads
-                            .where((l) =>
-                                l.assignedToId == u.id &&
-                                l.status == LeadStatus.siteVisit)
-                            .length;
-                        final uConv = uLeads == 0
-                            ? '0.0%'
-                            : '${(uClosed / uLeads * 100).toStringAsFixed(1)}%';
+                      ...teamPerformance.map((m) {
+                        final u = m['user'] as AppUser;
+                        final uLeads = m['leads'] as int;
+                        final uClosed = m['closed'] as int;
+                        final uRevenue = m['revenue'] as double;
+                        final uVisits = m['visits'] as int;
+                        final uConv = uLeads == 0 ? '0.0%' : '${(uClosed / uLeads * 100).toStringAsFixed(1)}%';
                         return Container(
                           margin: const EdgeInsets.only(bottom: 8),
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
                               color: AppColors.background,
                               borderRadius: BorderRadius.circular(10),
-                              border:
-                                  Border.all(color: AppColors.border)),
+                              border: Border.all(color: AppColors.border)),
                           child: Row(children: [
-                            AvatarWidget(
-                                initials: u.initials,
-                                size: 32,
-                                gradient: AppColors.gradientTertiary),
+                            AvatarWidget(initials: u.initials, size: 32, gradient: AppColors.gradientTertiary),
                             const SizedBox(width: 10),
                             Expanded(
                               child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
-                                  children: [
-                                    Text(u.name,
-                                        style: GoogleFonts.inter(
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.w600,
-                                            color: AppColors.textPrimary)),
-                                    Text(u.email,
-                                        style: GoogleFonts.inter(
-                                            fontSize: 10,
-                                            color: AppColors.textMuted)),
-                                  ]),
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(u.name, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                                  Text(u.email, style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
+                                  if (uRevenue > 0)
+                                    Text(_fmtRevReport(uRevenue), style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w700, color: const Color(0xFF7C6FFF))),
+                                ],
+                              ),
                             ),
                             Column(
-                                crossAxisAlignment:
-                                    CrossAxisAlignment.end,
-                                children: [
-                                  Text(
-                                      '$uLeads leads · $uClosed closed',
-                                      style: GoogleFonts.inter(
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w600,
-                                          color: AppColors.textPrimary)),
-                                  Text('$uVisits visits · $uConv',
-                                      style: GoogleFonts.inter(
-                                          fontSize: 10,
-                                          color: AppColors.textMuted)),
-                                ]),
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Text('$uLeads leads · $uClosed closed', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                                Text('$uVisits visits · $uConv', style: GoogleFonts.inter(fontSize: 10, color: AppColors.textMuted)),
+                              ],
+                            ),
                           ]),
                         );
                       }),
@@ -1322,6 +1493,29 @@ class _ReportPreviewSheetState extends State<ReportPreviewSheet> {
       '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}';
   String _fmtDateTime(DateTime dt) =>
       '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year.toString().substring(2)} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+
+
+  Widget _revChip(String label, String value, Color color, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(9),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Row(children: [
+        Icon(icon, size: 13, color: color),
+        const SizedBox(width: 6),
+        Expanded(child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label, style: GoogleFonts.inter(fontSize: 9, color: AppColors.textMuted)),
+            Text(value, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+          ],
+        )),
+      ]),
+    );
+  }
 }
 
 // ─── Admin Report Screen (for project admins) ─────────────────────────────────
@@ -1618,6 +1812,17 @@ class _AdminReportScreenState extends State<AdminReportScreen> {
         leads.where((l) => l.status == LeadStatus.newLead).length;
     final convRate =
         leads.isEmpty ? 0.0 : (closedLeads / leads.length) * 100;
+    // Revenue
+    final closedWithValue = leads.where(
+        (l) => l.status == LeadStatus.closed && l.closedValue != null).toList();
+    final totalRevenue =
+        closedWithValue.fold<double>(0, (s, l) => s + l.closedValue!);
+    final saleRevenue = closedWithValue
+        .where((l) => l.leadType == LeadType.sale)
+        .fold<double>(0, (s, l) => s + l.closedValue!);
+    final leaseRevenue = closedWithValue
+        .where((l) => l.leadType == LeadType.lease)
+        .fold<double>(0, (s, l) => s + l.closedValue!);
 
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -1728,7 +1933,99 @@ class _AdminReportScreenState extends State<AdminReportScreen> {
                 ],
               ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 12),
+
+            // ── Revenue Banner ────────────────────────────────────────────
+            if (totalRevenue > 0) ...[
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(colors: [
+                    const Color(0xFF7C6FFF).withValues(alpha: 0.10),
+                    const Color(0xFFFF9F7C).withValues(alpha: 0.06),
+                  ]),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                      color: const Color(0xFF7C6FFF).withValues(alpha: 0.28)),
+                ),
+                child: Row(children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                        gradient: AppColors.gradientPrimary,
+                        borderRadius: BorderRadius.circular(9)),
+                    child: const Icon(Icons.currency_rupee_rounded,
+                        size: 14, color: Colors.white),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Total Closed Revenue',
+                              style: GoogleFonts.inter(
+                                  fontSize: 10, color: AppColors.textMuted)),
+                          Text(_fmtRevReport(totalRevenue),
+                              style: GoogleFonts.inter(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.w800,
+                                  color: const Color(0xFF7C6FFF),
+                                  height: 1.1)),
+                        ]),
+                  ),
+                  Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                              color: AppColors.sky.withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(6)),
+                          child: Text('$closedLeads deals',
+                              style: GoogleFonts.inter(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.cyan)),
+                        ),
+                        const SizedBox(height: 6),
+                        if (saleRevenue > 0)
+                          Text(
+                              'Sale: ${_fmtRevReport(saleRevenue)}',
+                              style: GoogleFonts.inter(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.lavender)),
+                        if (leaseRevenue > 0)
+                          Text(
+                              'Lease/yr: ${_fmtRevReport(leaseRevenue)}',
+                              style: GoogleFonts.inter(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.peach)),
+                      ]),
+                ]),
+              ),
+              const SizedBox(height: 12),
+            ] else ...[
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: AppColors.border)),
+                child: Row(children: [
+                  const Icon(Icons.currency_rupee_rounded,
+                      size: 14, color: AppColors.textMuted),
+                  const SizedBox(width: 8),
+                  Text('No closed revenue recorded yet',
+                      style: GoogleFonts.inter(
+                          fontSize: 12, color: AppColors.textMuted)),
+                ]),
+              ),
+              const SizedBox(height: 12),
+            ],
 
             // CTA button
             SizedBox(
@@ -2056,6 +2353,17 @@ class _MasterAdminReportScreenState extends State<MasterAdminReportScreen> {
             (u.companyId == project.id && u.role == UserRole.sales))
         .toSet()
         .length;
+    // Revenue from closed leads with a recorded closedValue
+    final closedWithValue = leads.where(
+        (l) => l.status == LeadStatus.closed && l.closedValue != null).toList();
+    final totalRevenue = closedWithValue.fold<double>(
+        0, (s, l) => s + l.closedValue!);
+    final saleRevenue = closedWithValue
+        .where((l) => l.leadType == LeadType.sale)
+        .fold<double>(0, (s, l) => s + l.closedValue!);
+    final leaseRevenue = closedWithValue
+        .where((l) => l.leadType == LeadType.lease)
+        .fold<double>(0, (s, l) => s + l.closedValue!);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
@@ -2138,6 +2446,115 @@ class _MasterAdminReportScreenState extends State<MasterAdminReportScreen> {
                     AppColors.pink),
               ]),
             ),
+
+            // ── Revenue Banner (shown only when revenue > 0) ──────────────
+            if (totalRevenue > 0) ...[
+              const SizedBox(height: 10),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(colors: [
+                      const Color(0xFF7C6FFF).withValues(alpha: 0.10),
+                      const Color(0xFFFF9F7C).withValues(alpha: 0.06),
+                    ]),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                        color: const Color(0xFF7C6FFF)
+                            .withValues(alpha: 0.25)),
+                  ),
+                  child: Row(children: [
+                    Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                          gradient: AppColors.gradientPrimary,
+                          borderRadius: BorderRadius.circular(7)),
+                      child: const Icon(Icons.currency_rupee_rounded,
+                          size: 12, color: Colors.white),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Closed Revenue',
+                                style: GoogleFonts.inter(
+                                    fontSize: 9,
+                                    color: AppColors.textMuted)),
+                            Text(_fmtRevReport(totalRevenue),
+                                style: GoogleFonts.inter(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w800,
+                                    color: const Color(0xFF7C6FFF))),
+                          ]),
+                    ),
+                    // Sale / Lease chips
+                    if (saleRevenue > 0) ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 7, vertical: 4),
+                        decoration: BoxDecoration(
+                            color: AppColors.lavender
+                                .withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(6)),
+                        child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text('Sale',
+                                  style: GoogleFonts.inter(
+                                      fontSize: 8,
+                                      color: AppColors.textMuted)),
+                              Text(_fmtRevReport(saleRevenue),
+                                  style: GoogleFonts.inter(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppColors.lavender)),
+                            ]),
+                      ),
+                    ],
+                    if (leaseRevenue > 0) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 7, vertical: 4),
+                        decoration: BoxDecoration(
+                            color: AppColors.peach
+                                .withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(6)),
+                        child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text('Lease/yr',
+                                  style: GoogleFonts.inter(
+                                      fontSize: 8,
+                                      color: AppColors.textMuted)),
+                              Text(_fmtRevReport(leaseRevenue),
+                                  style: GoogleFonts.inter(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppColors.peach)),
+                            ]),
+                      ),
+                    ],
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 3),
+                      decoration: BoxDecoration(
+                          color: AppColors.sky.withValues(alpha: 0.18),
+                          borderRadius: BorderRadius.circular(5)),
+                      child: Text('$closedLeads deals',
+                          style: GoogleFonts.inter(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.cyan)),
+                    ),
+                  ]),
+                ),
+              ),
+            ],
             const SizedBox(height: 10),
 
             // Conversion + Generate button

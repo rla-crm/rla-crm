@@ -666,20 +666,23 @@ class _AdminHome extends StatelessWidget {
     );
   }
 
-  List<Widget> _buildProjectRevenueBreakdown(BuildContext context, List<dynamic> projects, List<dynamic> leads) {
-    final projectRevenues = projects.map((p) {
+  List<Widget> _buildProjectRevenueBreakdown(BuildContext context, List<RealEstateProject> projects, List<Lead> leads) {
+    // Build typed revenue list
+    final revEntries = <({RealEstateProject project, double revenue, int closed})>[];
+    for (final p in projects) {
       final pLeads = leads.where((l) => l.projectId == p.id).toList();
       final revenue = pLeads
           .where((l) => l.status == LeadStatus.closed && l.closedValue != null)
           .fold<double>(0, (sum, l) => sum + l.closedValue!);
       final closed = pLeads.where((l) => l.status == LeadStatus.closed).length;
-      return {'project': p, 'revenue': revenue, 'closed': closed};
-    }).where((m) => (m['revenue'] as double) > 0).toList()
-      ..sort((a, b) => (b['revenue'] as double).compareTo(a['revenue'] as double));
+      if (revenue > 0) revEntries.add((project: p, revenue: revenue, closed: closed));
+    }
+    revEntries.sort((a, b) => b.revenue.compareTo(a.revenue));
+    final projectRevenues = revEntries;
 
     if (projectRevenues.isEmpty) return [];
 
-    final totalRev = projectRevenues.fold<double>(0, (sum, m) => sum + (m['revenue'] as double));
+    final totalRev = projectRevenues.fold<double>(0, (sum, m) => sum + m.revenue);
 
     return [
       SectionHeader(title: 'Revenue by Project'),
@@ -688,9 +691,9 @@ class _AdminHome extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         child: Column(
           children: projectRevenues.map((m) {
-            final p = m['project'] as dynamic;
-            final revenue = m['revenue'] as double;
-            final closed = m['closed'] as int;
+            final p = m.project;
+            final revenue = m.revenue;
+            final closed = m.closed;
             final pct = totalRev > 0 ? (revenue / totalRev).clamp(0.0, 1.0) : 0.0;
             return Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
