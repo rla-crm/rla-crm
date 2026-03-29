@@ -89,6 +89,41 @@ Future<Uint8List> buildReportPdf({
   final convRate =
       leads.isEmpty ? 0.0 : (closedLeads / leads.length) * 100;
 
+  // ── Revenue calculations ──
+  final closedWithValue = leads
+      .where((l) => l.status == LeadStatus.closed && l.closedValue != null)
+      .toList();
+  final totalRevenue =
+      closedWithValue.fold<double>(0, (s, l) => s + l.closedValue!);
+  final saleRevenue = closedWithValue
+      .where((l) => l.leadType == LeadType.sale)
+      .fold<double>(0, (s, l) => s + l.closedValue!);
+  final leaseRevenue = closedWithValue
+      .where((l) => l.leadType == LeadType.lease)
+      .fold<double>(0, (s, l) => s + l.closedValue!);
+
+  // ── Star performers: sort by revenue desc, then closed count desc ──
+  final starPerformers = salesTeam.map((u) {
+    final uLeads  = leads.where((l) => l.assignedToId == u.id).length;
+    final uClosed = leads.where((l) => l.assignedToId == u.id && l.status == LeadStatus.closed).length;
+    final uVisits = leads.where((l) => l.assignedToId == u.id && l.status == LeadStatus.siteVisit).length;
+    final uRev    = leads
+        .where((l) => l.assignedToId == u.id && l.status == LeadStatus.closed && l.closedValue != null)
+        .fold<double>(0, (s, l) => s + l.closedValue!);
+    return (user: u, leads: uLeads, closed: uClosed, visits: uVisits, revenue: uRev);
+  }).where((e) => e.closed > 0).toList()
+    ..sort((a, b) {
+      final rc = b.revenue.compareTo(a.revenue);
+      return rc != 0 ? rc : b.closed.compareTo(a.closed);
+    });
+
+  // ── PDF revenue formatter ──
+  String fmtRev(double v) {
+    if (v >= 10000000) return '\u20b9${(v / 10000000).toStringAsFixed(2)} Cr';
+    if (v >= 100000)   return '\u20b9${(v / 100000).toStringAsFixed(2)} L';
+    return '\u20b9${v.toStringAsFixed(0)}';
+  }
+
   // ── Helpers ──
   pw.Widget _pdfSectionTitle(String t) => pw.Padding(
     padding: const pw.EdgeInsets.only(bottom: 6),
@@ -317,6 +352,137 @@ Future<Uint8List> buildReportPdf({
         ]),
         pw.SizedBox(height: 18),
 
+        // ── Closed Deal Revenue ──
+        if (totalRevenue > 0) ...[
+          _pdfSectionTitle('Closed Deal Revenue'),
+          pw.SizedBox(height: 8),
+          pw.Container(
+            padding: const pw.EdgeInsets.all(14),
+            decoration: pw.BoxDecoration(
+              color: PdfColor.fromHex('#F0EEFF'),
+              borderRadius: pw.BorderRadius.circular(10),
+              border: pw.Border.all(color: PdfColor.fromHex('#C9B8FF')),
+            ),
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                // Main revenue figure
+                pw.Row(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Expanded(
+                      child: pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: [
+                          pw.Text('Total Closed Revenue',
+                              style: pw.TextStyle(
+                                  fontSize: 9,
+                                  color: PdfColor.fromHex('#9B8FFF'))),
+                          pw.SizedBox(height: 3),
+                          pw.Text(fmtRev(totalRevenue),
+                              style: pw.TextStyle(
+                                  fontSize: 22,
+                                  fontWeight: pw.FontWeight.bold,
+                                  color: PdfColor.fromHex('#7C6FFF'))),
+                        ],
+                      ),
+                    ),
+                    pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.end,
+                      children: [
+                        pw.Container(
+                          padding: const pw.EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 4),
+                          decoration: pw.BoxDecoration(
+                            color: PdfColor.fromHex('#B8EEFF'),
+                            borderRadius: pw.BorderRadius.circular(6),
+                          ),
+                          child: pw.Text(
+                              '${closedWithValue.length} deal${closedWithValue.length == 1 ? '' : 's'} closed',
+                              style: pw.TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: pw.FontWeight.bold,
+                                  color: PdfColor.fromHex('#1A1A2E'))),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+                // Sale / Lease breakdown chips (only if either > 0)
+                if (saleRevenue > 0 || leaseRevenue > 0) ...[
+                  pw.SizedBox(height: 10),
+                  pw.Container(
+                    height: 1,
+                    color: PdfColor.fromHex('#C9B8FF'),
+                  ),
+                  pw.SizedBox(height: 10),
+                  pw.Row(children: [
+                    if (saleRevenue > 0)
+                      pw.Expanded(
+                        child: pw.Container(
+                          padding: const pw.EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 8),
+                          decoration: pw.BoxDecoration(
+                            color: PdfColor.fromHex('#EDE8FF'),
+                            borderRadius: pw.BorderRadius.circular(7),
+                            border: pw.Border.all(
+                                color: PdfColor.fromHex('#C9B8FF')),
+                          ),
+                          child: pw.Column(
+                            crossAxisAlignment: pw.CrossAxisAlignment.start,
+                            children: [
+                              pw.Text('Sales / Deal Value',
+                                  style: pw.TextStyle(
+                                      fontSize: 8,
+                                      color: PdfColor.fromHex('#9B8FFF'))),
+                              pw.SizedBox(height: 2),
+                              pw.Text(fmtRev(saleRevenue),
+                                  style: pw.TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: pw.FontWeight.bold,
+                                      color: PdfColor.fromHex('#7C6FFF'))),
+                            ],
+                          ),
+                        ),
+                      ),
+                    if (saleRevenue > 0 && leaseRevenue > 0)
+                      pw.SizedBox(width: 10),
+                    if (leaseRevenue > 0)
+                      pw.Expanded(
+                        child: pw.Container(
+                          padding: const pw.EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 8),
+                          decoration: pw.BoxDecoration(
+                            color: PdfColor.fromHex('#FFF3EC'),
+                            borderRadius: pw.BorderRadius.circular(7),
+                            border: pw.Border.all(
+                                color: PdfColor.fromHex('#FFD4A8')),
+                          ),
+                          child: pw.Column(
+                            crossAxisAlignment: pw.CrossAxisAlignment.start,
+                            children: [
+                              pw.Text('Annual Lease Amount (Rs/year)',
+                                  style: pw.TextStyle(
+                                      fontSize: 8,
+                                      color: PdfColor.fromHex('#CC8844'))),
+                              pw.SizedBox(height: 2),
+                              pw.Text(fmtRev(leaseRevenue),
+                                  style: pw.TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: pw.FontWeight.bold,
+                                      color: PdfColor.fromHex('#CC8844'))),
+                            ],
+                          ),
+                        ),
+                      ),
+                  ]),
+                ],
+              ],
+            ),
+          ),
+          pw.SizedBox(height: 18),
+        ],
+
         // ── Lead Status Breakdown ──
         _pdfSectionTitle('Lead Status Breakdown'),
         pw.SizedBox(height: 8),
@@ -401,7 +567,7 @@ Future<Uint8List> buildReportPdf({
                   fontSize: 10, color: PdfColor.fromHex('#B0B0C0')))
         else
           pw.TableHelper.fromTextArray(
-            headers: ['Name', 'Email', 'Leads', 'Closed', 'Visits', 'Conv.%'],
+            headers: ['Name', 'Leads', 'Closed', 'Visits', 'Conv.%', 'Revenue'],
             data: salesTeam.map((u) {
               final uLeads = leads.where((l) => l.assignedToId == u.id).length;
               final uClosed = leads
@@ -415,7 +581,20 @@ Future<Uint8List> buildReportPdf({
                   .length;
               final uConv =
                   uLeads == 0 ? '0.0%' : '${(uClosed / uLeads * 100).toStringAsFixed(1)}%';
-              return [u.name, u.email, '$uLeads', '$uClosed', '$uVisits', uConv];
+              final uRev = leads
+                  .where((l) =>
+                      l.assignedToId == u.id &&
+                      l.status == LeadStatus.closed &&
+                      l.closedValue != null)
+                  .fold<double>(0, (s, l) => s + l.closedValue!);
+              return [
+                u.name,
+                '$uLeads',
+                '$uClosed',
+                '$uVisits',
+                uConv,
+                uRev > 0 ? fmtRev(uRev) : '—',
+              ];
             }).toList(),
             headerStyle: pw.TextStyle(
                 fontSize: 9,
@@ -427,11 +606,11 @@ Future<Uint8List> buildReportPdf({
             cellStyle: pw.TextStyle(fontSize: 9),
             cellAlignments: {
               0: pw.Alignment.centerLeft,
-              1: pw.Alignment.centerLeft,
+              1: pw.Alignment.center,
               2: pw.Alignment.center,
               3: pw.Alignment.center,
               4: pw.Alignment.center,
-              5: pw.Alignment.center,
+              5: pw.Alignment.centerRight,
             },
             rowDecoration: pw.BoxDecoration(
               border: pw.Border(
@@ -443,6 +622,127 @@ Future<Uint8List> buildReportPdf({
                 color: PdfColor.fromHex('#F8F8FA')),
           ),
         pw.SizedBox(height: 18),
+
+        // ── Star Performers ──
+        if (starPerformers.isNotEmpty) ...[
+          _pdfSectionTitle('Star Performers'),
+          pw.SizedBox(height: 8),
+          ...starPerformers.asMap().entries.map((entry) {
+            final rank = entry.key + 1;
+            final e    = entry.value;
+            final conv = e.leads == 0
+                ? '0%'
+                : '${(e.closed / e.leads * 100).toStringAsFixed(0)}%';
+            // Medal emoji as text
+            final medal = rank == 1 ? '1st' : rank == 2 ? '2nd' : rank == 3 ? '3rd' : '#$rank';
+            final rowColor = rank == 1
+                ? PdfColor.fromHex('#FFFBE6')
+                : rank == 2
+                    ? PdfColor.fromHex('#F6F6F6')
+                    : rank == 3
+                        ? PdfColor.fromHex('#FFF5EE')
+                        : PdfColors.white;
+            final accentColor = rank == 1
+                ? PdfColor.fromHex('#C9A000')
+                : rank == 2
+                    ? PdfColor.fromHex('#888888')
+                    : rank == 3
+                        ? PdfColor.fromHex('#A0522D')
+                        : PdfColor.fromHex('#C9B8FF');
+            return pw.Padding(
+              padding: const pw.EdgeInsets.only(bottom: 6),
+              child: pw.Container(
+                padding: const pw.EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 10),
+                decoration: pw.BoxDecoration(
+                  color: rowColor,
+                  borderRadius: pw.BorderRadius.circular(8),
+                  border: pw.Border.all(color: accentColor),
+                ),
+                child: pw.Row(children: [
+                  // Rank badge
+                  pw.Container(
+                    width: 32,
+                    height: 32,
+                    decoration: pw.BoxDecoration(
+                      color: accentColor,
+                      borderRadius: pw.BorderRadius.circular(16),
+                    ),
+                    child: pw.Center(
+                      child: pw.Text(medal,
+                          style: pw.TextStyle(
+                              fontSize: 8,
+                              fontWeight: pw.FontWeight.bold,
+                              color: PdfColors.white)),
+                    ),
+                  ),
+                  pw.SizedBox(width: 10),
+                  // Name + email
+                  pw.Expanded(
+                    flex: 3,
+                    child: pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                        pw.Text(e.user.name,
+                            style: pw.TextStyle(
+                                fontSize: 10,
+                                fontWeight: pw.FontWeight.bold,
+                                color: PdfColor.fromHex('#1A1A2E'))),
+                        pw.Text(e.user.email,
+                            style: pw.TextStyle(
+                                fontSize: 8,
+                                color: PdfColor.fromHex('#B0B0C0'))),
+                      ],
+                    ),
+                  ),
+                  pw.SizedBox(width: 8),
+                  // Stats
+                  pw.Expanded(
+                    flex: 4,
+                    child: pw.Row(
+                      mainAxisAlignment: pw.MainAxisAlignment.spaceEvenly,
+                      children: [
+                        _kpiBox('Leads',   '${e.leads}',  PdfColor.fromHex('#C9B8FF')),
+                        pw.SizedBox(width: 4),
+                        _kpiBox('Closed',  '${e.closed}', PdfColor.fromHex('#B8EEFF')),
+                        pw.SizedBox(width: 4),
+                        _kpiBox('Conv.',   conv,           PdfColor.fromHex('#FFB8D9')),
+                      ],
+                    ),
+                  ),
+                  pw.SizedBox(width: 8),
+                  // Revenue highlight
+                  pw.Container(
+                    padding: const pw.EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 6),
+                    decoration: pw.BoxDecoration(
+                      color: PdfColor.fromHex('#EDE8FF'),
+                      borderRadius: pw.BorderRadius.circular(7),
+                      border: pw.Border.all(
+                          color: PdfColor.fromHex('#C9B8FF')),
+                    ),
+                    child: pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.end,
+                      children: [
+                        pw.Text('Revenue',
+                            style: pw.TextStyle(
+                                fontSize: 7,
+                                color: PdfColor.fromHex('#9B8FFF'))),
+                        pw.SizedBox(height: 2),
+                        pw.Text(e.revenue > 0 ? fmtRev(e.revenue) : '—',
+                            style: pw.TextStyle(
+                                fontSize: 11,
+                                fontWeight: pw.FontWeight.bold,
+                                color: PdfColor.fromHex('#7C6FFF'))),
+                      ],
+                    ),
+                  ),
+                ]),
+              ),
+            );
+          }),
+          pw.SizedBox(height: 18),
+        ],
 
         // ── All Leads ──
         _pdfSectionTitle('All Leads (${leads.length})'),
@@ -456,21 +756,26 @@ Future<Uint8List> buildReportPdf({
             headers: [
               'Name',
               'Phone',
-              'Source',
               'Status',
               'Assigned To',
-              'Date'
+              'Date',
+              'Deal Value',
             ],
             data: leads.map((lead) {
               final d =
                   '${lead.createdAt.day.toString().padLeft(2, '0')}/${lead.createdAt.month.toString().padLeft(2, '0')}/${lead.createdAt.year}';
+              // Deal value: show formatted amount for closed leads, '—' otherwise
+              final dealVal = (lead.status == LeadStatus.closed &&
+                      lead.closedValue != null)
+                  ? fmtRev(lead.closedValue!)
+                  : '—';
               return [
                 lead.name,
                 lead.phone,
-                lead.source.label,
                 lead.status.label,
                 lead.assignedToName,
                 d,
+                dealVal,
               ];
             }).toList(),
             headerStyle: pw.TextStyle(
@@ -485,9 +790,9 @@ Future<Uint8List> buildReportPdf({
               0: pw.Alignment.centerLeft,
               1: pw.Alignment.centerLeft,
               2: pw.Alignment.center,
-              3: pw.Alignment.center,
-              4: pw.Alignment.centerLeft,
-              5: pw.Alignment.center,
+              3: pw.Alignment.centerLeft,
+              4: pw.Alignment.center,
+              5: pw.Alignment.centerRight,
             },
             rowDecoration: pw.BoxDecoration(
               border: pw.Border(
