@@ -1143,6 +1143,20 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
           projectName: entityName,
         ),
       );
+
+      // In-app notification: new team member joined project
+      if (req.companyId != null) {
+        final roleLabel = role == UserRole.companyAdmin ? 'Project Admin' : 'Sales Team member';
+        _pushProjectNotif(
+          projectId:    req.companyId!,
+          projectName:  entityName,
+          title: 'New Team Member Joined',
+          message: '${req.applicantName} has joined "$entityName" as a $roleLabel.',
+          priority: NotificationPriority.medium,
+          actorId: _currentUser?.id,
+          includeSales: role != UserRole.companyAdmin, // don't notify sales when another admin joins
+        );
+      }
     } catch (_) {}
   }
 
@@ -1261,6 +1275,20 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         projectName: projects.map((p) => p.name).join(', '),
       ),
     );
+
+    // In-app notification: new admin assigned — notify master admin + existing admins of each project
+    for (final proj in projects) {
+      _pushProjectNotif(
+        projectId:    proj.id,
+        projectName:  proj.name,
+        title: 'New Project Admin Added',
+        message: '$name has been assigned as Project Admin for "${proj.name}" by ${_currentUser?.name ?? 'Master Admin'}.',
+        priority: NotificationPriority.medium,
+        includeAdmins: true,
+        includeSales:  false, // don't notify sales team about admin assignments
+        actorId: _currentUser?.id,
+      );
+    }
     return null;
   }
 
@@ -1327,7 +1355,18 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       _saveProject(updatedProject);
     }
 
-    
+    // In-app notification: admin assigned to project — notify master admins + existing project admins
+    _pushProjectNotif(
+      projectId:    projectId,
+      projectName:  project.name,
+      title: 'Project Admin Assigned',
+      message: '${adminUser.name} has been assigned as Project Admin for "${project.name}" by ${_currentUser?.name ?? 'Master Admin'}.',
+      priority: NotificationPriority.medium,
+      includeAdmins: true,
+      includeSales:  false, // admin assignment doesn't go to sales team
+      actorId: _currentUser?.id,
+    );
+
     notifyListeners();
     return null;
   }
@@ -1379,7 +1418,23 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       } catch (_) {}
     }
 
-    
+    // In-app notification: sales user assigned to project(s) — notify admins of each project + master admin
+    for (final pid in projectIds) {
+      RealEstateProject? proj;
+      try { proj = _projects.firstWhere((p) => p.id == pid); } catch (_) {}
+      if (proj == null) continue;
+      _pushProjectNotif(
+        projectId:    proj.id,
+        projectName:  proj.name,
+        title: 'New Sales Member Added',
+        message: '${salesUser.name} has been added to the sales team for "${proj.name}" by ${_currentUser?.name ?? 'Admin'}.',
+        priority: NotificationPriority.medium,
+        includeAdmins: true,
+        includeSales:  false, // don't notify other sales members about team changes
+        actorId: _currentUser?.id,
+      );
+    }
+
     notifyListeners();
     return null;
   }
@@ -1436,8 +1491,11 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     _notifyProjectUpdated(p);
   }
 
-  /// Notify all sales team members of a project update.
+  /// Notify sales team (email) + everyone in the project (in-app) of a project update.
   void _notifyProjectUpdated(RealEstateProject p) {
+    final actor = _currentUser?.name ?? 'Admin';
+
+    // Email to each sales member
     final teamMembers = _users.where((u) =>
         u.role == UserRole.sales &&
         u.isApproved &&
@@ -1449,17 +1507,27 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         toEmail: member.email,
         toName: member.name,
         subject: '🏢 Project Update – ${p.name}',
-        body: 'Hi ${member.name}, your project "${p.name}" has been updated by ${_currentUser?.name ?? 'Admin'}.',
+        body: 'Hi ${member.name}, your project "${p.name}" has been updated by $actor.',
         triggerEvent: 'project_updated',
         htmlContent: EmailService.projectUpdateToTeamEmail(
           memberName: member.name,
           projectName: p.name,
           updateType: 'Project details updated',
-          updatedBy: _currentUser?.name ?? 'Admin',
+          updatedBy: actor,
           details: p.status.label,
         ),
       );
     }
+
+    // In-app notification: admin + sales of this project + master admin
+    _pushProjectNotif(
+      projectId:   p.id,
+      projectName: p.name,
+      title: 'Project Updated – ${p.name}',
+      message: '$actor updated project "${p.name}" (Status: ${p.status.label}).',
+      priority: NotificationPriority.medium,
+      actorId: _currentUser?.id,
+    );
   }
   void deleteProject(String id) {
     _projects = _projects.where((p) => p.id != id).toList();
@@ -1538,8 +1606,16 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   // ─── CRUD: Leads ──────────────────────────────────────────────────────────
   void addLead(Lead l) {
     _saveLead(l);
-    // Notify the assigned sales agent about the new lead
-    _notifyLeadAssigned(l);
+    _notifyLeadAssigned(l);   // email to assigned agent
+    // In-app notification: admin + sales of this project + master admin
+    _pushProjectNotif(
+      projectId:   l.projectId,
+      projectName: l.projectName,
+      title: 'New Lead Added',
+      message: '"${l.name}" added to ${l.projectName} by ${_currentUser?.name ?? 'Admin'} — assigned to ${l.assignedToName}.',
+      priority: NotificationPriority.medium,
+      actorId: _currentUser?.id,
+    );
   }
 
   void updateLead(Lead l) {
@@ -1548,11 +1624,70 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         : null;
     l.updatedAt = DateTime.now();
     _saveLead(l);
-    // Email triggers on meaningful status changes
-    _notifyLeadUpdated(l, previous);
+    _notifyLeadUpdated(l, previous);    // email
+    _pushLeadUpdateNotif(l, previous);  // in-app
   }
 
-  /// Notify assigned sales agent when a new lead is assigned to them.
+  /// In-app notification for lead changes — scoped strictly to the lead's project.
+  void _pushLeadUpdateNotif(Lead l, Lead? previous) {
+    // Determine what changed
+    String? title;
+    String? message;
+    NotificationPriority priority = NotificationPriority.medium;
+
+    final actor = _currentUser?.name ?? 'Someone';
+
+    if (previous == null) return; // addLead already fires its own notif
+
+    final statusChanged = previous.status != l.status;
+    final assigneeChanged = previous.assignedToId != l.assignedToId;
+    final notesChanged = (previous.notes ?? '') != (l.notes ?? '');
+
+    if (statusChanged) {
+      if (l.status == LeadStatus.closed) {
+        final dealVal = l.closedValue != null
+            ? ' — Deal: ₹${_fmtRevPlain(l.closedValue!)}'
+            : '';
+        title   = '🎉 Deal Closed – ${l.projectName}';
+        message = '"${l.name}" marked Closed by $actor$dealVal.';
+        priority = NotificationPriority.high;
+      } else {
+        title   = 'Lead Status Updated';
+        message = '"${l.name}" moved from ${previous.status.label} → ${l.status.label} by $actor in ${l.projectName}.';
+      }
+    } else if (assigneeChanged) {
+      title   = 'Lead Reassigned';
+      message = '"${l.name}" reassigned to ${l.assignedToName} by $actor in ${l.projectName}.';
+    } else if (notesChanged) {
+      title   = 'Lead Notes Updated';
+      message = '"${l.name}" notes updated by $actor in ${l.projectName}.';
+      priority = NotificationPriority.low;
+    } else {
+      // Minor field edit — still notify but low priority
+      title   = 'Lead Updated';
+      message = '"${l.name}" was updated by $actor in ${l.projectName}.';
+      priority = NotificationPriority.low;
+    }
+
+    if (title == null) return;
+
+    // Sales-team actor → admin + master admin only (not other sales members)
+    // Admin actor       → sales team + master admin
+    final actorIsSales = _currentUser?.role == UserRole.sales;
+
+    _pushProjectNotif(
+      projectId:    l.projectId,
+      projectName:  l.projectName,
+      title:        title,
+      message:      message!,
+      priority:     priority,
+      includeAdmins: true,
+      includeSales:  !actorIsSales, // sales-to-sales updates don't cross-notify
+      actorId:      _currentUser?.id,
+    );
+  }
+
+  /// Email: notify assigned sales agent when a new lead is assigned to them.
   void _notifyLeadAssigned(Lead l) {
     if (l.assignedToId.isEmpty) return;
     AppUser? agent;
@@ -1576,9 +1711,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     );
   }
 
-  /// Send emails on lead status changes (closed → admin/team, other → admin update).
+  /// Email: notify on lead status changes.
   void _notifyLeadUpdated(Lead l, Lead? previous) {
-    // Only trigger if status has actually changed
     if (previous != null && previous.status == l.status &&
         previous.assignedToId == l.assignedToId) return;
 
@@ -1587,12 +1721,10 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         u.isApproved &&
         (u.projectIds.contains(l.projectId) || u.companyId == l.projectId)).toList();
 
-    // If assignment changed, notify new agent
     if (previous != null && previous.assignedToId != l.assignedToId) {
       _notifyLeadAssigned(l);
     }
 
-    // If status changed to Closed, notify all project admins
     if (l.status == LeadStatus.closed &&
         (previous == null || previous.status != LeadStatus.closed)) {
       final dealValue = l.closedValue != null ? '₹${_fmtRevPlain(l.closedValue!)}' : null;
@@ -1615,7 +1747,6 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         );
       }
     } else if (previous != null && previous.status != l.status) {
-      // Status changed to something else — notify admins of the update
       final action = 'Status changed from ${previous.status.label} to ${l.status.label}';
       for (final admin in projectAdmins) {
         if (admin.email.isEmpty) continue;
@@ -1644,6 +1775,76 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (v >= 1e5) return '${(v / 1e5).toStringAsFixed(2)} L';
     return v.toStringAsFixed(0);
   }
+
+  // ─── Project-scoped in-app notification helper ────────────────────────────
+  /// Creates one CrmNotification targeted ONLY to:
+  ///   • all approved sales-team members of [projectId]
+  ///   • all approved project-admin(s) of [projectId]   (if [includeAdmins] = true)
+  ///   • all master-admin users
+  /// The actor ([actorId]) is excluded so they don't see their own action.
+  /// [excludeRoles] lets callers suppress a role (e.g. don't spam sales when
+  /// another sales member acts — only admin + master admin should see that).
+  void _pushProjectNotif({
+    required String projectId,
+    required String projectName,
+    required String title,
+    required String message,
+    required NotificationPriority priority,
+    bool includeAdmins  = true,
+    bool includeSales   = true,
+    String? actorId,
+  }) {
+    // Build the exact target-user list
+    final targets = <String>{};
+
+    // Master admins always included
+    for (final u in _users.where((u) =>
+        u.role == UserRole.masterAdmin && u.isApproved)) {
+      if (u.id != actorId) targets.add(u.id);
+    }
+
+    // Project admins for this specific project
+    if (includeAdmins) {
+      for (final u in _users.where((u) =>
+          u.role == UserRole.companyAdmin &&
+          u.isApproved &&
+          (u.projectIds.contains(projectId) || u.companyId == projectId))) {
+        if (u.id != actorId) targets.add(u.id);
+      }
+    }
+
+    // Sales team for this specific project only
+    if (includeSales) {
+      for (final u in _users.where((u) =>
+          u.role == UserRole.sales &&
+          u.isApproved &&
+          (u.projectIds.contains(projectId) || u.companyId == projectId))) {
+        if (u.id != actorId) targets.add(u.id);
+      }
+    }
+
+    if (targets.isEmpty) return;
+
+    final notif = CrmNotification(
+      title: title,
+      message: message,
+      createdById: actorId ?? 'system',
+      createdByName: actorId != null
+          ? (_users.where((u) => u.id == actorId).isNotEmpty
+              ? _users.firstWhere((u) => u.id == actorId).name
+              : 'System')
+          : 'System',
+      targetUserIds: targets.toList(),
+      projectId: projectId,
+      projectName: projectName,
+      priority: priority,
+      companyId: projectId,   // use projectId as scope key
+      isForAll: false,
+      isAlert: true,          // always show as popup
+    );
+    _saveNotification(notif);
+  }
+
   void deleteLead(String id) {
     _leads = _leads.where((l) => l.id != id).toList();
     notifyListeners();

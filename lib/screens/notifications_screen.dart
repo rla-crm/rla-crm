@@ -207,6 +207,21 @@ class _NotifCard extends StatelessWidget {
                             fontSize: 12,
                             color: AppColors.textSecondary)),
                     const SizedBox(height: 6),
+                    if (notif.projectName != null && notif.projectName!.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.apartment_rounded, size: 10, color: AppColors.lavender),
+                            const SizedBox(width: 3),
+                            Text(
+                              notif.projectName!,
+                              style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w600, color: AppColors.lavender),
+                            ),
+                          ],
+                        ),
+                      ),
                     Row(
                       children: [
                         Text('By ${notif.createdByName}',

@@ -131,7 +131,8 @@ class _AppRouterState extends State<AppRouter> {
 
   void _checkNewAlertsFromState(AppState state) {
     final user = state.currentUser;
-    if (user == null || user.role == UserRole.masterAdmin) return;
+    if (user == null) return;
+    // All roles — including master admin — see alert popups
     final myNotifs = state.myNotifications;
     for (final notif in myNotifs) {
       if (!notif.isRead && !_shownAlertIds.contains(notif.id) && notif.isAlert) {
@@ -139,7 +140,7 @@ class _AppRouterState extends State<AppRouter> {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) _showAlertPopup(state, notif);
         });
-        break;
+        break; // show one at a time; next will appear on next rebuild
       }
     }
   }
@@ -221,6 +222,24 @@ class _AlertPopupDialog extends StatelessWidget {
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
+            if (notification.projectName != null && notification.projectName!.isNotEmpty)
+              Container(
+                margin: const EdgeInsets.only(bottom: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppColors.lavender.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppColors.lavender.withValues(alpha: 0.25)),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  const Icon(Icons.apartment_rounded, size: 12, color: AppColors.lavender),
+                  const SizedBox(width: 4),
+                  Text(
+                    notification.projectName!,
+                    style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.lavender),
+                  ),
+                ]),
+              ),
             Text(
               'From: ${notification.createdByName}',
               style: GoogleFonts.inter(fontSize: 11, color: AppColors.textMuted, fontStyle: FontStyle.italic),

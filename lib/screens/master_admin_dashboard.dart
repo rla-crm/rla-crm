@@ -7,6 +7,7 @@ import '../core/theme.dart';
 import '../widgets/common_widgets.dart';
 import 'report_screen.dart';
 import 'lead_list_screen.dart';
+import 'notifications_screen.dart';
 
 // ─── Master Admin Dashboard ───────────────────────────────────────────────────
 class MasterAdminDashboard extends StatefulWidget {
@@ -22,7 +23,7 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard>
   late AnimationController _fadeCtrl;
   late Animation<double> _fadeAnim;
 
-  static const _tabs = ['Overview', 'Approvals', 'Projects', 'Analytics', 'Users', 'Reports', 'Settings'];
+  static const _tabs = ['Overview', 'Approvals', 'Projects', 'Analytics', 'Users', 'Reports', 'Notifications', 'Settings'];
   static const _icons = [
     Icons.dashboard_outlined,
     Icons.pending_actions_outlined,
@@ -30,6 +31,7 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard>
     Icons.analytics_outlined,
     Icons.people_outline_rounded,
     Icons.bar_chart_rounded,
+    Icons.notifications_outlined,
     Icons.settings_outlined,
   ];
 
@@ -65,6 +67,7 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard>
     }
     final state = context.watch<AppState>();
     final pendingCount = state.pendingApprovalCount;
+    final unreadNotifs = state.unreadNotificationCount;
     return Scaffold(
       backgroundColor: AppColors.background,
       drawer: Drawer(
@@ -76,6 +79,7 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard>
           current: _tab,
           onSelect: (i) { Navigator.pop(context); _switchTab(i); },
           pendingApprovals: pendingCount,
+          unreadNotifications: unreadNotifs,
         ),
       ),
       body: _buildMobileLayout(),
@@ -85,6 +89,7 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard>
   Widget _buildWideLayout() {
     final state = context.watch<AppState>();
     final pendingCount = state.pendingApprovalCount;
+    final unreadNotifs = state.unreadNotificationCount;
     return Row(
       children: [
         _MasterSidebar(
@@ -93,6 +98,7 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard>
           current: _tab,
           onSelect: _switchTab,
           pendingApprovals: pendingCount,
+          unreadNotifications: unreadNotifs,
         ),
         Expanded(
           child: FadeTransition(opacity: _fadeAnim, child: _currentScreen()),
@@ -104,6 +110,7 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard>
   Widget _buildMobileLayout() {
     final state = context.watch<AppState>();
     final pendingCount = state.pendingApprovalCount;
+    final unreadNotifs = state.unreadNotificationCount;
     return Column(
       children: [
         // Mobile top bar with menu + logout
@@ -161,6 +168,7 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard>
           current: _tab,
           onSelect: _switchTab,
           pendingApprovals: pendingCount,
+          unreadNotifications: unreadNotifs,
         ),
       ],
     );
@@ -174,7 +182,8 @@ class _MasterAdminDashboardState extends State<MasterAdminDashboard>
       case 3: return const _MasterAnalyticsScreen();
       case 4: return const _AllUsersScreen();
       case 5: return const MasterAdminReportScreen();
-      case 6: return const _MasterSettingsScreen();
+      case 6: return const NotificationsScreen();
+      case 7: return const _MasterSettingsScreen();
       default: return const _MasterOverview();
     }
   }
@@ -187,10 +196,12 @@ class _MasterSidebar extends StatelessWidget {
   final int current;
   final ValueChanged<int> onSelect;
   final int pendingApprovals;
+  final int unreadNotifications;
 
   const _MasterSidebar({
     required this.tabs, required this.icons, required this.current,
     required this.onSelect, required this.pendingApprovals,
+    this.unreadNotifications = 0,
   });
 
   @override
@@ -263,7 +274,11 @@ class _MasterSidebar extends StatelessWidget {
 
   Widget _sidebarItem(int i) {
     final sel = i == current;
-    final showBadge = i == 1 && pendingApprovals > 0;
+    // Tab 1 = Approvals badge, Tab 6 = Notifications badge
+    final badgeCount = i == 1 ? pendingApprovals : (i == 6 ? unreadNotifications : 0);
+    final showBadge = badgeCount > 0;
+    final badgeColor = i == 6 ? AppColors.lavender : AppColors.pink;
+    final badgeTextColor = i == 6 ? AppColors.textPrimary : const Color(0xFFD04060);
     return GestureDetector(
       onTap: () => onSelect(i),
       child: Container(
@@ -283,10 +298,10 @@ class _MasterSidebar extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
-                  color: sel ? AppColors.textPrimary.withValues(alpha: 0.15) : AppColors.pink,
+                  color: sel ? AppColors.textPrimary.withValues(alpha: 0.15) : badgeColor.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Text('$pendingApprovals', style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w700, color: sel ? AppColors.textPrimary : const Color(0xFFD04060))),
+                child: Text('$badgeCount', style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w700, color: sel ? AppColors.textPrimary : badgeTextColor)),
               ),
           ],
         ),
@@ -319,10 +334,12 @@ class _MasterBottomNav extends StatelessWidget {
   final int current;
   final ValueChanged<int> onSelect;
   final int pendingApprovals;
+  final int unreadNotifications;
 
   const _MasterBottomNav({
     required this.tabs, required this.icons, required this.current,
     required this.onSelect, required this.pendingApprovals,
+    this.unreadNotifications = 0,
   });
 
   @override
@@ -366,6 +383,15 @@ class _MasterBottomNav extends StatelessWidget {
                               width: 14, height: 14,
                               decoration: const BoxDecoration(color: AppColors.pink, shape: BoxShape.circle),
                               child: Center(child: Text('$pendingApprovals', style: GoogleFonts.inter(fontSize: 8, fontWeight: FontWeight.w700, color: Colors.white))),
+                            ),
+                          ),
+                        if (i == 6 && unreadNotifications > 0)
+                          Positioned(
+                            top: -2, right: -6,
+                            child: Container(
+                              width: 14, height: 14,
+                              decoration: BoxDecoration(color: AppColors.lavender, shape: BoxShape.circle),
+                              child: Center(child: Text('$unreadNotifications', style: GoogleFonts.inter(fontSize: 8, fontWeight: FontWeight.w700, color: AppColors.textPrimary))),
                             ),
                           ),
                       ],
