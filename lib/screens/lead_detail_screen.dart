@@ -93,8 +93,8 @@ class _LeadDetailScreenState extends State<LeadDetailScreen> with TickerProvider
               const Spacer(),
               const RlaBrand(size: 13),
               const Spacer(),
-              // ── Delete button (admin only) ─────────────────────────────────
-              if (state.isAdmin)
+              // ── Delete button (all users) ──────────────────────────────────
+              if (state.isAdmin || _lead.assignedToId == state.currentUser?.id)
                 GestureDetector(
                   onTap: () => _confirmDelete(context, state),
                   child: Container(

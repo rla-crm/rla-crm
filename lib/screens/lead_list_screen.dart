@@ -464,7 +464,7 @@ class _ActiveLeadsTab extends StatelessWidget {
                       padding: const EdgeInsets.only(bottom: 10),
                       child: _LeadCard(lead: lead, onTap: () => onTap(lead)),
                     );
-                    if (!isAdmin) return card;
+                    // All users can delete leads (swipe left)
                     return Dismissible(
                       key: ValueKey(lead.id),
                       direction: DismissDirection.endToStart,
@@ -723,7 +723,7 @@ class _ClosedLeadsTab extends StatelessWidget {
                   padding: const EdgeInsets.only(bottom: 10),
                   child: _ClosedLeadCard(lead: l, onTap: () => onTap(l)),
                 );
-                if (!isAdmin) return card;
+                // All users can delete leads (swipe left)
                 return Dismissible(
                   key: ValueKey('closed_${l.id}'),
                   direction: DismissDirection.endToStart,
