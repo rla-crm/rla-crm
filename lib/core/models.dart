@@ -3,6 +3,35 @@ import 'package:uuid/uuid.dart';
 
 const _uuid = Uuid();
 
+// ─── Safe date parser ─────────────────────────────────────────────────────────
+// Handles: null, Firestore Timestamp objects, ISO strings with/without Z,
+// strings with timezone offsets (+05:30), and any other malformed values.
+// Returns DateTime.now() as a safe fallback so fromMap never throws.
+DateTime _parseDate(dynamic raw) {
+  if (raw == null) return DateTime.now();
+  // Firestore Timestamp (from cloud_firestore SDK on native/web)
+  if (raw is DateTime) return raw;
+  // cloud_firestore Timestamp has a .toDate() method
+  try {
+    final ts = raw as dynamic;
+    if (ts.toDate != null) return ts.toDate() as DateTime;
+  } catch (_) {}
+  // String parsing — handle timezone offsets by replacing +HH:MM with Z equivalent
+  final s = raw.toString().trim();
+  if (s.isEmpty) return DateTime.now();
+  try {
+    return DateTime.parse(s);
+  } catch (_) {
+    // Try stripping timezone offset like '+05:30' → parse as UTC
+    try {
+      final cleaned = s.replaceAll(RegExp(r'[+-]\d{2}:\d{2}$'), '');
+      return DateTime.parse(cleaned);
+    } catch (_) {
+      return DateTime.now(); // absolute fallback
+    }
+  }
+}
+
 // ─── Enums ───────────────────────────────────────────────────────────────────
 
 enum UserRole { masterAdmin, companyAdmin, sales }
@@ -223,8 +252,8 @@ class ApprovalRequest {
         phone: map['phone'],
         password: map['password'],
         role: map['role'],
-        createdAt: DateTime.parse(map['createdAt']),
-        updatedAt: DateTime.parse(map['updatedAt']),
+        createdAt: _parseDate(map['createdAt']),
+        updatedAt: _parseDate(map['updatedAt']),
         reviewedBy: map['reviewedBy'],
         reviewNote: map['reviewNote'],
       );
@@ -272,7 +301,7 @@ class EmailLog {
         subject: map['subject'] ?? '',
         body: map['body'] ?? '',
         triggerEvent: map['triggerEvent'] ?? '',
-        sentAt: DateTime.parse(map['sentAt']),
+        sentAt: _parseDate(map['sentAt']),
         isSimulated: map['isSimulated'] ?? true,
       );
 }
@@ -352,7 +381,7 @@ class AppUser {
       isActive: map['isActive'] ?? true,
       isApproved: map['isApproved'] ?? true, // legacy defaults to approved
       hasLoggedInBefore: map['hasLoggedInBefore'] ?? true, // legacy already logged in
-      createdAt: DateTime.parse(map['createdAt']),
+      createdAt: _parseDate(map['createdAt']),
       companyId: cid,
       companyName: map['companyName'],
       projectIds: storedIds,
@@ -481,8 +510,8 @@ class RealEstateProject {
         adminIds: List<String>.from(map['adminIds'] ?? []),
         createdById: map['createdById'] ?? '',
         createdByName: map['createdByName'] ?? '',
-        createdAt: DateTime.parse(map['createdAt']),
-        updatedAt: DateTime.parse(map['updatedAt']),
+        createdAt: _parseDate(map['createdAt']),
+        updatedAt: _parseDate(map['updatedAt']),
         totalUnits: map['totalUnits'] ?? 0,
         reraNumber: map['reraNumber'],
         companyId: map['companyId'] ?? '',
@@ -528,7 +557,7 @@ class LeadActivity {
         action: map['action'], note: map['note'],
         fromStatus: map['fromStatus'] != null ? LeadStatus.values[map['fromStatus']] : null,
         toStatus: map['toStatus'] != null ? LeadStatus.values[map['toStatus']] : null,
-        timestamp: DateTime.parse(map['timestamp']),
+        timestamp: _parseDate(map['timestamp']),
       );
 }
 
@@ -653,8 +682,8 @@ class Lead {
         assignedToName: map['assignedToName'] ?? '',
         notes: map['notes'], siteVisitDate: map['siteVisitDate'],
         followUpDate: map['followUpDate'],
-        createdAt: DateTime.parse(map['createdAt']),
-        updatedAt: DateTime.parse(map['updatedAt']),
+        createdAt: _parseDate(map['createdAt']),
+        updatedAt: _parseDate(map['updatedAt']),
         createdById: map['createdById'] ?? '',
         createdByName: map['createdByName'] ?? '',
         activities: (map['activities'] as List?)?.map((a) => LeadActivity.fromMap(a)).toList() ?? [],
@@ -717,7 +746,7 @@ class CrmNotification {
         projectId: map['projectId'], projectName: map['projectName'],
         isForAll: map['isForAll'] ?? false,
         priority: NotificationPriority.values[map['priority'] ?? 1],
-        createdAt: DateTime.parse(map['createdAt']),
+        createdAt: _parseDate(map['createdAt']),
         isRead: map['isRead'] ?? false,
         companyId: map['companyId'] ?? '',
         isAlert: map['isAlert'] ?? false,

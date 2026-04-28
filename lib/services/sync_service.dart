@@ -106,14 +106,30 @@ class SyncService {
     }
   }
 
+  // ── Check if a doc is a real data record (not an init/placeholder doc) ─────
+  static bool _isRealDoc(DocumentSnapshot<Map<String, dynamic>> d) {
+    // Skip the _init sentinel doc used during collection creation
+    if (d.id == '_init') return false;
+    final data = d.data();
+    if (data == null) return false;
+    // Skip docs explicitly marked as placeholders
+    if (data['_placeholder'] == true) return false;
+    // Skip docs that have no 'id' field AND no recognisable content
+    // (extra safety net for any other sentinel documents)
+    final hasId = data.containsKey('id') && data['id'] != null && data['id'].toString().isNotEmpty;
+    final hasName = data.containsKey('name') || data.containsKey('email') ||
+        data.containsKey('title') || data.containsKey('applicantName');
+    return hasId || hasName;
+  }
+
   // ── Fetch a single collection, skipping placeholder docs ─────────────────
   static Future<List<Map<String, dynamic>>> _fetchCollection(String col) async {
     final snap = await _db.collection(col).get();
     return snap.docs
-        .where((d) => d.id != '_init' && d.data()['_placeholder'] != true)
+        .where(_isRealDoc)
         .map((d) {
-          final data = d.data();
-          if (!data.containsKey('id')) data['id'] = d.id;
+          final data = Map<String, dynamic>.from(d.data()!);
+          if (!data.containsKey('id') || data['id'] == null) data['id'] = d.id;
           return data;
         })
         .toList();
@@ -123,10 +139,10 @@ class SyncService {
   static Stream<List<Map<String, dynamic>>> watchCollection(String col) {
     return _db.collection(col).snapshots().map((snap) {
       return snap.docs
-          .where((d) => d.id != '_init' && d.data()['_placeholder'] != true)
+          .where(_isRealDoc)
           .map((d) {
-            final data = d.data();
-            if (!data.containsKey('id')) data['id'] = d.id;
+            final data = Map<String, dynamic>.from(d.data()!);
+            if (!data.containsKey('id') || data['id'] == null) data['id'] = d.id;
             return data;
           })
           .toList();
